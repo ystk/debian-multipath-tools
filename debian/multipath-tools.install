@@ -1,0 +1,4 @@
+/sbin/multi*
+/lib/multipath/*
+/lib/libmultipath.so.*
+/usr/share/man/man*/multi*gz

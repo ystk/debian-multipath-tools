@@ -1,0 +1,24 @@
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Sun, 30 Aug 2009 13:38:55 +0200
+Subject: [PATCH] check header file for defintion of dm_task_no_flush
+
+instead of checking the so for the symbol (which seems to be hard to
+find).
+---
+ libmultipath/Makefile |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/libmultipath/Makefile b/libmultipath/Makefile
+index 13178bd..d59e2f3 100644
+--- a/libmultipath/Makefile
++++ b/libmultipath/Makefile
+@@ -14,7 +14,7 @@ OBJS = memory.o parser.o vector.o devmapper.o callout.o \
+        log.o configure.o structs_vec.o sysfs.o prio.o checkers.o \
+        lock.o waiter.o
+ 
+-LIBDM_API_FLUSH = $(shell if test -d /lib64 ; then objdump -T /lib64/libdevmapper.so* ; else objdump -T /lib/libdevmapper.so.* ; fi | grep -c dm_task_no_flush)
++LIBDM_API_FLUSH = $(shell grep -Ecs '^[a-z]*[[:space:]]+dm_task_no_flush' /usr/include/libdevmapper.h)
+ 
+ ifneq ($(strip $(LIBDM_API_FLUSH)),0)
+ 	CFLAGS += -DLIBDM_API_FLUSH -D_GNU_SOURCE
+-- 

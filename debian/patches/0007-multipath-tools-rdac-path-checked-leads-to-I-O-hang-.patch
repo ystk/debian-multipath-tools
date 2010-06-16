@@ -1,0 +1,65 @@
+From: Chauhan, Vijay <Vijay.Chauhan@lsi.com>
+Date: Tue, 20 Oct 2009 18:39:15 +0530
+Subject: [PATCH] multipath-tools: rdac path checked leads to I/O hang when volumes are unmapped from storage.
+
+Hi,
+
+We are seeing I/O hang when volumes (configured with rdac path checker) are unmapped from the storage. Expected is I/O should fail. Please see the syslog snippet below:
+
+Oct  15 14:40:43 linux kernel: sd 6:0:0:0: queueing MODE_SELECT command.
+Oct  15 14:40:43 linux kernel: sd 6:0:0:0: MODE_SELECT failed with sense 0x59100.
+Oct  15 14:40:43 linux kernel: end_request: I/O error, dev sdh, sector 18509824
+Oct  15 14:40:43 linux kernel: device-mapper: multipath: Failing path 8:112.
+Oct  15 14:40:43 linux kernel: end_request: I/O error, dev sdh, sector 0
+Oct  15 14:40:43 linux kernel: end_request: I/O error, dev sdh, sector 18512896
+Oct  15 14:40:43 linux kernel: end_request: I/O error, dev sdh, sector 18511872
+Oct  15 14:40:43 linux kernel: end_request: I/O error, dev sdh, sector 18510848
+Oct  15 14:40:43 linux multipathd: 8:112: mark as failed
+Oct  15 14:40:43 linux multipathd: 3600a0b800029ea52000097bc4acde51e: Entering recovery mode: max_retries=30
+Oct  15 14:40:44 linux multipathd: 3600a0b800029eb0a0000f2af4acde4d1: queue_if_no_path enabled
+Oct  15 14:40:44 linux multipathd: 3600a0b800029eb0a0000f2af4acde4d1: Recovered to normal mode
+Oct  15 14:40:44 linux kernel: sd 5:0:0:1: queueing MODE_SELECT command.
+Oct  15 14:40:44 linux kernel: sd 5:0:0:1: MODE_SELECT failed with sense 0x59100.
+Oct  15 14:40:44 linux kernel: end_request: I/O error, dev sdc, sector 0
+Oct  15 14:40:44 linux kernel: device-mapper: multipath: Failing path 8:32.
+Oct  15 14:40:44 linux kernel: end_request: I/O error, dev sdc, sector 16089088
+Oct  15 14:40:44 linux kernel: end_request: I/O error, dev sdc, sector 16090112
+Oct  15 14:40:44 linux kernel: end_request: I/O error, dev sdc, sector 16091136
+Oct  15 14:40:44 linux kernel: end_request: I/O error, dev sdc, sector 16092160
+Oct  15 14:40:44 linux multipathd: 8:32: mark as failed
+
+Below is the patch that fix this issue. When devices are unmapped from storage, rdac patch checker sets the path state for those devices as ghost. As a reason dm issues mode select to failover path group and fails with 0x59100, which eventually ends up with ping pong between path groups resulting in I/O hang. In rdac path checker, we need to check if devices are not connected, mark it as failed. This patch adds check for Peripheral Qualifier (PQ) & Peripheral Device type(PDT) of Inquiry data and fails the path if either 1) PQ is set to 0x1 or 2) PQ set to 0x11 and PDT set to 0x1F.
+
+Signed-off-by: Vijay Chauhan <vijay.chauhan@lsi.com>
+Reviewed-by: Babu Moger <babu.moger@lsi.com>
+---
+ libmultipath/checkers/rdac.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/libmultipath/checkers/rdac.c b/libmultipath/checkers/rdac.c
+index 1f46ac8..f9585d9 100644
+--- a/libmultipath/checkers/rdac.c
++++ b/libmultipath/checkers/rdac.c
+@@ -91,7 +91,8 @@ do_inq(int sg_fd, unsigned int pg_op, void *resp, int mx_resp_len)
+ 
+ struct volume_access_inq
+ {
+-	char dontcare0[8];
++	char PQ_PDT;
++	char dontcare0[7];
+ 	char avtcvp;
+ 	char dontcare1[39];
+ };
+@@ -105,6 +106,11 @@ libcheck_check (struct checker * c)
+ 	if (0 != do_inq(c->fd, 0xC9, &inq, sizeof(struct volume_access_inq))) {
+ 		MSG(c, MSG_RDAC_DOWN);
+ 		return PATH_DOWN;
++	} else {
++		if ((inq.PQ_PDT & 0x20) || (inq.PQ_PDT & 0x7f)) {
++			/* LUN not connected*/
++			return PATH_DOWN;
++		}
+ 	}
+ 
+ 	if (inq.avtcvp & 0x1) {
+-- 
