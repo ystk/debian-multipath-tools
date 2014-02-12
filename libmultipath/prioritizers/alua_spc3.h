@@ -273,6 +273,9 @@ struct rtpg_tp_dscr {
 #define AAS_NON_OPTIMIZED		0x1
 #define AAS_STANDBY			0x2
 #define AAS_UNAVAILABLE			0x3
+#define AAS_LBA_DEPENDENT		0x4
+#define AAS_RESERVED			0x5
+#define AAS_OFFLINE			0xe
 #define AAS_TRANSITIONING		0xf
 
 #define TPG_STATUS_NONE			0x0
@@ -283,7 +286,8 @@ struct rtpg_tpg_dscr {
 	unsigned char	b0;		/* x....... = pref(ered) port        */
 					/* .xxx.... = reserved               */
 					/* ....xxxx = asymetric access state */
-	unsigned char	b1;		/* xxxx.... = reserved               */
+	unsigned char	b1;		/* xxx..... = reserved               */
+					/* ...x.... = LBA dependent support  */
 					/* ....x... = unavailable support    */
 					/* .....x.. = standby support        */
 					/* ......x. = non-optimized support  */
@@ -299,7 +303,7 @@ struct rtpg_tpg_dscr {
 static inline int
 rtpg_tpg_dscr_get_aas(struct rtpg_tpg_dscr *d)
 {
-	return (d->b0 & 0x0f);
+	return (d->b0 & 0x8f);
 }
 
 struct rtpg_data {

@@ -40,7 +40,8 @@ The following \fIsection\fP keywords are recognized:
 .TP 17
 .B defaults
 This section defines default values for attributes which are used
-whenever no specific setting is given.
+whenever no values are given in the appropriate device or multipath
+sections.
 .TP
 .B blacklist
 This section defines which devices should be excluded from the
@@ -67,22 +68,53 @@ The
 section recognizes the following keywords:
 .TP 17
 .B polling_interval
-interval between two path checks in seconds; default is
+interval between two path checks in seconds. For properly functioning paths,
+the interval between checks will gradually increase to
+.B max_polling_interval;
+default is
 .I 5
+.TP
+.B max_polling_interval
+maximal interval between two path checks in seconds; default is
+.I 4 * polling_interval
 .TP
 .B udev_dir
 directory where udev creates its device nodes; default is
 .I /dev
+.TP
+.B multipath_dir
+directory where the dynamic shared objects are stored; default is system
+dependent, commonly
+.I /lib/multipath
 .TP
 .B verbosity
 default verbosity. Higher values increase the verbosity level. Valid
 levels are between 0 and 6; default is
 .I 2
 .TP
-.B selector
+.B reassign_maps
+enable reassigning of device-mapper maps. With this option multipathd
+will remap existing device-mapper maps to always point to multipath
+device, not the underlying block devices. Possible values are
+\fIyes\fR and \fIno\fR. Default is
+.I yes
+.TP
+.B path_selector
 The default path selector algorithm to use; they are offered by the
-kernel multipath target. The only currently implemented is
-.I "round-robin 0"
+kernel multipath target. There are three selector algorithms.
+.RS
+.TP 12
+.B "round-robin 0"
+Loop through every path in the path group, sending the same amount of IO to
+each.
+.TP
+.B "queue-length 0"
+Send the next bunch of IO down the path with the least amount of outstanding IO.
+.TP
+.B "service-time 0"
+Choose the path for the next bunch of IO based on the amount of outstanding IO
+to the path and its relative throughput.
+.RE
 .TP
 .B path_grouping_policy
 The default path grouping policy to apply to unspecified
@@ -114,58 +146,85 @@ Default value is \fImultibus\fR.
 The default program and args to callout to obtain a unique path
 identifier. Should be specified with an absolute path. Default value
 is
-.I /lib/udev/scsi_id --whitelisted --device=/dev/%n
+.I /lib/udev/scsi_id --whitelisted --replace-whitespace --device=/dev/%n
 .TP
-.B prio_callout
-The default program and args to callout to obtain a path priority
-value. The specified program will be executed and should return a
-numeric value specifying the relative priority of this path. Higher
-number have a higher priority. A '%n' in the command line will be expanded
-to the device name, a '%b' will be expanded to the device number in
-.I major:minor
-format.
+.B prio
+The name of the path priority routine. The specified routine
+should return a numeric value specifying the relative priority
+of this path. Higher number have a higher priority.
 .I "none"
-is a valid value. Currently the following path priority programs are
-implemented:
+is a valid value. Currently the following path priority routines
+are implemented:
 .RS
 .TP 12
-.B mpath_prio_emc /dev/%n
-Generate the path priority for EMC arrays
+.B const
+Return a constant priority of \fI1\fR.
 .TP
-.B mpath_prio_alua /dev/%n
+.B emc
+Generate the path priority for EMC arrays.
+.TP
+.B alua
 Generate the path priority based on the SCSI-3 ALUA settings.
 .TP
-.B mpath_prio_netapp /dev/%n
+.B ontap
 Generate the path priority for NetApp arrays.
 .TP
-.B mpath_prio_rdac /dev/%n
-Generate the path priority for LSI/Engenio RDAC controller.
+.B rdac
+Generate the path priority for LSI/Engenio/NetApp E-Series RDAC controller.
 .TP
-.B mpath_prio_hp_sw /dev/%n
+.B hp_sw
 Generate the path priority for Compaq/HP controller in
 active/standby mode.
 .TP
-.B mpath_prio_hds_modular %b
+.B hds
 Generate the path priority for Hitachi HDS Modular storage arrays.
+.TP
+.B random
+Generate a random priority between 1 and 10.
+.TP 12
+.B weightedpath
+Generate the path priority based on the regular expression and the 
+priority provided as argument. requires prio_args keyword.
 .TP
 Default value is \fBnone\fR.
 .RE
 .TP
+.B prio_args
+Arguments to pass to to the prio function.  Currently only used with
+.I weighted, which needs a value of the form
+.I "<hbtl|devname> <regex1> <prio1> <regex2> <prio2> ..."
+.I hbtl
+regex can be of SCSI H:B:T:L format  Ex: 1:0:.:. , *:0:0:.
+.I devname
+regex can be of device name format  Ex: sda , sd.e
+.TP
 .B features
-Specify any device-mapper features to be used. The most common of
-these features is
-.I "1 queue_if_no_path" 
-Note that this can also be set via the
+Specify any device-mapper features to be used. Syntax is
+.I num list
+where
+.I num
+is the number of features in
+.I list.
+Possible values for the feature list are
+.RS
+.TP 12
+.B queue_if_no_path
+Queue IO if no path is active; identical to the
 .I no_path_retry
 keyword.
 .TP
+.B no_partitions
+Disable automatic partitions generation via kpartx.
+.RE
+.TP
 .B path_checker
-The default method used to determine the paths' state. Possible values
+The default method used to determine the paths state. Possible values
 are
 .RS
 .TP 12
 .B readsector0
-Read the first sector of the device
+(Deprecated) Read the first sector of the device. This checker is being
+deprecated, please use \fIdirectio\fR instead
 .TP
 .B tur
 Issue a
@@ -180,36 +239,50 @@ state.
 Check the path state for HP storage arrays with Active/Standby firmware.
 .TP
 .B rdac
-Check the path state for LSI/Engenio RDAC storage controller.
+Check the path state for LSI/Engenio/NetApp E-Series RDAC storage controller.
 .TP
 .B directio
 Read the first sector with direct I/O.
 .TP
-Default value is \fIreadsector0\fR.
+Default value is \fIdirectio\fR.
 .RE
 .TP
 .B failback
-Tell the daemon to manage path group failback, or not to. 0 or
-.I immediate
-means immediate failback, values >0 means deferred failback (in
-seconds).
-.I manual
-means no failback. Default value is
-.I manual
+Tell multipathd how to manage path group failback.
+.RS
+.TP 12
+.B immediate
+Immediately failback to the highest priority pathgroup that contains
+active paths.
+.TP
+.B manual
+Do not perform automatic failback.
+.TP
+.B values > 0
+deferred failback (time to defer in seconds)
+.TP
+Default value is \fImanual\fR.
+.RE
 .TP
 .B  rr_min_io
 The number of IO to route to a path before switching to the next in
-the same path group. Default is
+the same path group. This is only for BIO based multipath. Default is
 .I 1000
+.TP
+.B rr_min_io_q
+The number of IO requests to route to a path before switching to the
+next in the same path group. This is only for request based multipath.
+Default is
+.I 1
 .TP
 .B rr_weight
 If set to \fIpriorities\fR the multipath configurator will assign
 path weights as "path prio * rr_min_io". Possible values are
 .I priorities
 or
-.I uniform
-. Default is
-.I uniform
+.IR uniform .
+Default is
+.IR uniform .
 .TP
 .B no_path_retry
 Specify the number of retries until disable queueing, or
@@ -222,13 +295,20 @@ for never stop queueing. Default is 0.
 If set to 
 .I yes
 , using the bindings file
-.I /var/lib/multipath/bindings
+.I /etc/multipath/bindings
 to assign a persistent and unique alias to the multipath, in the form of mpath<n>.
 If set to 
 .I no
 use the WWID as the alias. In either case this be will
 be overriden by any specific aliases in the \fImultipaths\fR section.
 Default is
+.I no
+.TP
+.B flush_on_last_del
+If set to
+.I yes
+, multipathd will disable queueing when the last path to a device has been
+deleted. Default is
 .I no
 .TP
 .B max_fds
@@ -238,6 +318,48 @@ this to the system limit from /proc/sys/fs/nr_open. If this is not set, the
 maximum number of open fds is taken from the calling process. It is usually
 1024. To be safe, this should be set to the maximum number of paths plus 32,
 if that number is greated than 1024.
+.TP
+.B checker_timeout
+Specify the timeout to user for path checkers that issue scsi commands with an
+explict timeout, in seconds; default taken from
+.I /sys/block/sd<x>/device/timeout
+.TP
+.B fast_io_fail_tmo
+Specify the number of seconds the scsi layer will wait after a problem has been
+detected on a FC remote port before failing IO to devices on that remote port.
+This should be smaller than dev_loss_tmo. Setting this to
+.I off
+will disable the timeout.
+.TP
+.B dev_loss_tmo
+Specify the number of seconds the scsi layer will wait after a problem has
+been detected on a FC remote port before removing it from the system.
+.TP
+.B queue_without_daemon
+If set to
+.I no
+, when multipathd stops, queueing will be turned off for all devices.
+This is useful for devices that set no_path_retry.  If a machine is
+shut down while all paths to a device are down, it is possible to hang waiting
+for IO to return from the device after multipathd has been stopped. Without
+multipathd running, access to the paths cannot be restored, and the kernel
+cannot be told to stop queueing IO. Setting queue_without_daemon to
+.I no
+, avoids this problem. Default is
+.I yes
+.TP
+.B bindings_file
+The full pathname of the binding file to be used when the user_friendly_names option is set. Defaults to
+.I /var/lib/multipath/bindings
+.TP
+.B log_checker_err
+If set to
+.I once
+, multipathd logs the first path checker error at logging level 2. Any later
+errors are logged at level 3 until the device is restored. If set to
+.I always
+, multipathd always logs the path checker error at logging level 2. Default is
+.I always
 .
 .SH "blacklist section"
 The
@@ -309,6 +431,8 @@ Index of the container. Mandatory for this subsection.
 The following attributes are optional; if not set the default values
 are taken from the
 .I defaults
+or
+.I devices
 section:
 .sp 1
 .PD .1v
@@ -318,11 +442,23 @@ section:
 .TP
 .B path_selector
 .TP
+.B prio
+.TP
+.B prio_args
+.TP
 .B failback
+.TP
+.B rr_weight
+.TP
+.B flush_on_last_del
 .TP
 .B no_path_retry
 .TP
 .B rr_min_io
+.TP
+.B rr_min_io_q
+.TP
+.B features
 .RE
 .PD
 .LP
@@ -343,8 +479,15 @@ subsection recognizes the following attributes:
 .B product
 (Mandatory) Product identifier
 .TP
+.B revision
+(Optional) Revision identfier
+.TP
 .B product_blacklist
-Product strings to blacklist for this vendor
+(Optional) Product strings to blacklist for this vendor
+.TP
+.B alias_prefix
+(Optional) The user_friendly_names prefix to use for this
+device type, instead of the default "mpath"
 .TP
 .B hardware_handler
 (Optional) The hardware handler to use for this device type.
@@ -353,6 +496,16 @@ The following hardware handler are implemented:
 .TP 12
 .B 1 emc
 Hardware handler for EMC storage arrays.
+.TP
+.B 1 rdac
+Hardware handler for LSI/Engenio/NetApp E-Series RDAC storage controller.
+.TP
+.B 1 hp_sw
+Hardware handler for Compaq/HP storage arrays in active/standby
+mode.
+.TP
+.B 1 alua
+Hardware handler for SCSI-3 ALUA compatible arrays.
 .RE
 .LP
 The following attributes are optional; if not set the default values
@@ -371,9 +524,11 @@ section:
 .TP
 .B path_checker
 .TP
-.B features
+.B prio
 .TP
-.B prio_callout
+.B prio_args
+.TP
+.B features
 .TP
 .B failback
 .TP
@@ -382,6 +537,14 @@ section:
 .B no_path_retry
 .TP
 .B rr_min_io
+.TP
+.B rr_min_io_rq
+.TP
+.B fast_io_fail_tmo
+.TP
+.B dev_loss_tmo
+.TP
+.B flush_on_last_del
 .RE
 .PD
 .LP
@@ -394,6 +557,20 @@ processes being hung and not killable in situations where all the paths to the L
 It is advisable to use the
 .B no_path_retry
 option instead.
+.P
+The use of
+.B queue_if_no_path
+or
+.B no_path_retry
+might lead to a deadlock if the
+.B dev_loss_tmo
+setting results in a device being removed while I/O is still queued.
+The multipath daemon will update the
+.B dev_loss_tmo
+setting accordingly to avoid this deadlock. Hence if both values are
+specified the order of precedence is
+.I no_path_retry, queue_if_no_path, dev_loss_tmo
+
 .SH "SEE ALSO"
 .BR udev (8),
 .BR dmsetup (8)
@@ -401,4 +578,4 @@ option instead.
 .BR multipathd (8)
 .SH AUTHORS
 .B multipath
-was developed by Christophe Varoqui, <christophe.varoqui@free.fr> and others.
+was developed by Christophe Varoqui, <christophe.varoqui@opensvc.com> and others.

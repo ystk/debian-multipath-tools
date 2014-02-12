@@ -22,6 +22,8 @@
  * Copyright (c) 2005 Edward Goggin, EMC
  */
 
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -51,6 +53,7 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include "dev_t.h"
 
 int logsink;
 
@@ -79,9 +82,10 @@ usage (char * progname)
 {
 	fprintf (stderr, VERSION_STRING);
 	fprintf (stderr, "Usage:\n");
-	fprintf (stderr, "  %s [-d] [-r] [-v lvl] [-p pol] [-b fil] [dev]\n", progname);
+	fprintf (stderr, "  %s [-d] [-r] [-v lvl] [-p pol] [-b fil] [-q] [dev]\n", progname);
 	fprintf (stderr, "  %s -l|-ll|-f [-v lvl] [-b fil] [dev]\n", progname);
 	fprintf (stderr, "  %s -F [-v lvl]\n", progname);
+	fprintf (stderr, "  %s -t\n", progname);
 	fprintf (stderr, "  %s -h\n", progname);
 	fprintf (stderr,
 		"\n"
@@ -91,7 +95,9 @@ usage (char * progname)
 		"  -ll     show multipath topology (maximum info)\n" \
 		"  -f      flush a multipath device map\n" \
 		"  -F      flush all multipath device maps\n" \
+		"  -q      allow queue_if_no_path when multipathd is not running\n"\
 		"  -d      dry run, do not create or update devmaps\n" \
+		"  -t      dump internal hardware table\n" \
 		"  -r      force devmap reload\n" \
 		"  -p      policy failover|multibus|group_by_serial|group_by_prio\n" \
 		"  -b fil  bindings file location\n" \
@@ -113,7 +119,6 @@ usage (char * progname)
 		"          . multipath including the path with maj:min 'dev' (ex: 8:0)\n" \
 		);
 
-	exit(1);
 }
 
 static int
@@ -132,7 +137,8 @@ update_paths (struct multipath * mpp)
 
 		vector_foreach_slot (pgp->paths, pp, j) {
 			if (!strlen(pp->dev)) {
-				if (devt2devname(pp->dev, pp->dev_t)) {
+				if (devt2devname(pp->dev, FILE_NAME_SIZE,
+						 pp->dev_t)) {
 					/*
 					 * path is not in sysfs anymore
 					 */
@@ -160,6 +166,7 @@ get_dm_mpvec (vector curmp, vector pathvec, char * refwwid)
 {
 	int i;
 	struct multipath * mpp;
+	char params[PARAMS_SIZE], status[PARAMS_SIZE];
 
 	if (dm_get_maps(curmp))
 		return 1;
@@ -177,10 +184,12 @@ get_dm_mpvec (vector curmp, vector pathvec, char * refwwid)
 			continue;
 		}
 
-		condlog(3, "params = %s", mpp->params);
-		condlog(3, "status = %s", mpp->status);
+		dm_get_map(mpp->alias, &mpp->size, params);
+		condlog(3, "params = %s", params);
+		dm_get_status(mpp->alias, status);
+		condlog(3, "status = %s", status);
 
-		disassemble_map(pathvec, mpp->params, mpp);
+		disassemble_map(pathvec, params, mpp);
 
 		/*
 		 * disassemble_map() can add new paths to pathvec.
@@ -193,7 +202,7 @@ get_dm_mpvec (vector curmp, vector pathvec, char * refwwid)
 		if (conf->list > 1)
 			mpp->bestpg = select_path_group(mpp);
 
-		disassemble_status(mpp->status, mpp);
+		disassemble_status(status, mpp);
 
 		if (conf->list)
 			print_multipath_topology(mpp, conf->verbosity);
@@ -245,14 +254,14 @@ configure (void)
 		else
 			dev = conf->dev;
 	}
-	
+
 	/*
 	 * if we have a blacklisted device parameter, exit early
 	 */
-	if (dev && 
+	if (dev &&
 	    (filter_devnode(conf->blist_devnode, conf->elist_devnode, dev) > 0))
 			goto out;
-	
+
 	/*
 	 * scope limiting must be translated into a wwid
 	 * failing the translation is fatal (by policy)
@@ -319,13 +328,78 @@ out:
 	return r;
 }
 
+static int
+dump_config (void)
+{
+	char * c;
+	char * reply;
+	unsigned int maxlen = 256;
+	int again = 1;
+
+	reply = MALLOC(maxlen);
+
+	while (again) {
+		if (!reply)
+			return 1;
+		c = reply;
+		c += snprint_defaults(c, reply + maxlen - c);
+		again = ((c - reply) == maxlen);
+		if (again) {
+			reply = REALLOC(reply, maxlen *= 2);
+			continue;
+		}
+		c += snprint_blacklist(c, reply + maxlen - c);
+		again = ((c - reply) == maxlen);
+		if (again) {
+			reply = REALLOC(reply, maxlen *= 2);
+			continue;
+		}
+		c += snprint_blacklist_except(c, reply + maxlen - c);
+		again = ((c - reply) == maxlen);
+		if (again) {
+			reply = REALLOC(reply, maxlen *= 2);
+			continue;
+		}
+		c += snprint_hwtable(c, reply + maxlen - c, conf->hwtable);
+		again = ((c - reply) == maxlen);
+		if (again) {
+			reply = REALLOC(reply, maxlen *= 2);
+			continue;
+		}
+		c += snprint_mptable(c, reply + maxlen - c, conf->mptable);
+		again = ((c - reply) == maxlen);
+		if (again)
+			reply = REALLOC(reply, maxlen *= 2);
+	}
+
+	printf("%s", reply);
+	FREE(reply);
+	return 0;
+}
+
+static int
+get_dev_type(char *dev) {
+	struct stat buf;
+	int i;
+
+	if (stat(dev, &buf) == 0 && S_ISBLK(buf.st_mode)) {
+		if (dm_is_dm_major(MAJOR(buf.st_rdev)))
+			return DEV_DEVMAP;
+		return DEV_DEVNODE;
+	}
+	else if (sscanf(dev, "%d:%d", &i, &i) == 2)
+		return DEV_DEVT;
+	else
+		return DEV_DEVMAP;
+}
+
 int
 main (int argc, char *argv[])
 {
 	int arg;
 	extern char *optarg;
 	extern int optind;
-	int i, r = 1;
+	int r = 1;
 
 	if (getuid() != 0) {
 		fprintf(stderr, "need to be root\n");
@@ -338,31 +412,31 @@ main (int argc, char *argv[])
 	if (load_config(DEFAULT_CONFIGFILE))
 		exit(1);
 
-	if (init_checkers()) {
-		condlog(0, "failed to initialize checkers");
-		exit(1);
-	}
-	if (init_prio()) {
-		condlog(0, "failed to initialize prioritizers");
-		exit(1);
-	}
 	if (sysfs_init(conf->sysfs_dir, FILE_NAME_SIZE)) {
 		condlog(0, "multipath tools need sysfs mounted");
 		exit(1);
 	}
-	while ((arg = getopt(argc, argv, ":dhl::FfM:v:p:b:r")) != EOF ) {
+	while ((arg = getopt(argc, argv, ":dhl::FfM:v:p:b:Brtq")) != EOF ) {
 		switch(arg) {
 		case 1: printf("optarg : %s\n",optarg);
 			break;
 		case 'v':
 			if (sizeof(optarg) > sizeof(char *) ||
-			    !isdigit(optarg[0]))
+			    !isdigit(optarg[0])) {
 				usage (argv[0]);
+				exit(1);
+			}
 
 			conf->verbosity = atoi(optarg);
 			break;
 		case 'b':
-			conf->bindings_file = optarg;
+			conf->bindings_file = strdup(optarg);
+			break;
+		case 'B':
+			conf->bindings_read_only = 1;
+			break;
+		case 'q':
+			conf->allow_queueing = 1;
 			break;
 		case 'd':
 			conf->dry_run = 1;
@@ -391,23 +465,31 @@ main (int argc, char *argv[])
 			if (conf->pgpolicy_flag == -1) {
 				printf("'%s' is not a valid policy\n", optarg);
 				usage(argv[0]);
-			}                
+				exit(1);
+			}
 			break;
 		case 'r':
 			conf->force_reload = 1;
 			break;
+		case 't':
+			r = dump_config();
+			goto out;
 		case 'h':
 			usage(argv[0]);
+			exit(0);
 		case ':':
 			fprintf(stderr, "Missing option arguement\n");
-			usage(argv[0]);        
+			usage(argv[0]);
+			exit(1);
 		case '?':
 			fprintf(stderr, "Unknown switch: %s\n", optarg);
 			usage(argv[0]);
+			exit(1);
 		default:
 			usage(argv[0]);
+			exit(1);
 		}
-	}        
+	}
 	if (optind < argc) {
 		conf->dev = MALLOC(FILE_NAME_SIZE);
 
@@ -415,14 +497,7 @@ main (int argc, char *argv[])
 			goto out;
 
 		strncpy(conf->dev, argv[optind], FILE_NAME_SIZE);
-
-		if (filepresent(conf->dev))
-			conf->dev_type = DEV_DEVNODE;
-		else if (sscanf(conf->dev, "%d:%d", &i, &i) == 2)
-			conf->dev_type = DEV_DEVT;
-		else
-			conf->dev_type = DEV_DEVMAP;
-
+		conf->dev_type = get_dev_type(conf->dev);
 	}
 	conf->daemon = 0;
 
@@ -436,6 +511,14 @@ main (int argc, char *argv[])
 				conf->max_fds, strerror(errno));
 	}
 
+	if (init_checkers()) {
+		condlog(0, "failed to initialize checkers");
+		exit(1);
+	}
+	if (init_prio()) {
+		condlog(0, "failed to initialize prioritizers");
+		exit(1);
+	}
 	dm_init();
 
 	if (conf->remove == FLUSH_ONE) {
@@ -452,8 +535,9 @@ main (int argc, char *argv[])
 	}
 	while ((r = configure()) < 0)
 		condlog(3, "restart multipath configuration process");
-	
+
 out:
+	udev_wait(conf->cookie);
 
 	sysfs_cleanup();
 	dm_lib_release();
