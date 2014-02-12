@@ -23,6 +23,7 @@
 #include "blacklist.h"
 #include "switchgroup.h"
 #include "devmapper.h"
+#include "uevent.h"
 
 #define MAX(x,y) (x > y) ? x : y
 #define TAIL     (line + len - 1 - c)
@@ -378,6 +379,7 @@ snprint_pg_selector (char * buff, size_t len, struct pathgroup * pgp)
 static int
 snprint_pg_pri (char * buff, size_t len, struct pathgroup * pgp)
 {
+	int avg_priority = 0;
 	/*
 	 * path group priority is not updated for every path prio change,
 	 * but only on switch group code path.
@@ -385,7 +387,9 @@ snprint_pg_pri (char * buff, size_t len, struct pathgroup * pgp)
 	 * Printing is another reason to update.
 	 */
 	path_group_prio_update(pgp);
-	return snprint_int(buff, len, pgp->priority);
+	if (pgp->enabled_paths)
+		avg_priority = pgp->priority / pgp->enabled_paths;
+	return snprint_int(buff, len, avg_priority);
 }
 
 static int
@@ -407,6 +411,12 @@ static int
 snprint_path_size (char * buff, size_t len, struct path * pp)
 {
 	return snprint_size(buff, len, pp->size);
+}
+
+static int
+snprint_path_serial (char * buff, size_t len, struct path * pp)
+{
+	return snprint_str(buff, len, pp->serial);
 }
 
 static int
@@ -451,6 +461,7 @@ struct path_data pd[] = {
 	{'C', "next_check",    0, snprint_next_check},
 	{'p', "pri",           0, snprint_pri},
 	{'S', "size",          0, snprint_path_size},
+	{'z', "serial",        0, snprint_path_serial},
 	{0, NULL, 0 , NULL}
 };
 
@@ -1226,6 +1237,14 @@ snprint_status (char * buff, int len, struct vectors *vecs)
 				checker_state_name(i), count[i]);
 	}
 
+        int monitored_count = 0;
+
+        vector_foreach_slot(vecs->pathvec, pp, i)
+                if (pp->fd != -1)
+                        monitored_count++;
+        fwd += snprintf(buff + fwd, len - fwd, "\npaths: %d\nbusy: %s\n",
+			monitored_count, is_uevent_busy()? "True" : "False");
+
 	if (fwd > len)
 		return len;
 	return fwd;
@@ -1333,11 +1352,11 @@ print_pathgroup (struct pathgroup * pgp, char * style)
 }
 
 extern void
-print_map (struct multipath * mpp)
+print_map (struct multipath * mpp, char * params)
 {
-	if (mpp->size && mpp->params)
+	if (mpp->size && params)
 		printf("0 %llu %s %s\n",
-			 mpp->size, TGT_MPATH, mpp->params);
+			 mpp->size, TGT_MPATH, params);
 	return;
 }
 

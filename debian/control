@@ -2,11 +2,12 @@ Source: multipath-tools
 Section: admin
 Priority: extra
 Maintainer: Debian LVM Team <pkg-lvm-maintainers@lists.alioth.debian.org>
-Uploaders: Guido Günther <agx@sigxcpu.org>
-Build-Depends: debhelper (>= 5.0.45), po-debconf, libdevmapper-dev (>= 2:1.02.20), libreadline-dev, quilt (>= 0.40), libaio-dev
-XS-Vcs-Git: git://git.debian.org/git/pkg-lvm/multipath-tools.git
-XS-Vcs-Browser: http://git.debian.org/?p=pkg-lvm/multipath-tools.git
-Standards-Version: 3.8.4
+Uploaders: Guido Günther <agx@sigxcpu.org>, Ritesh Raj Sarraf <rrs@debian.org>
+Build-Depends: debhelper (>= 5.0.45), po-debconf, libdevmapper-dev (>= 2:1.02.20), libreadline-dev, libaio-dev
+Vcs-Git: git://git.debian.org/git/pkg-lvm/multipath-tools.git
+Vcs-Browser: http://git.debian.org/?p=pkg-lvm/multipath-tools.git
+Standards-Version: 3.9.1
+Homepage: http://christophe.varoqui.free.fr/
 
 Package: multipath-tools
 Architecture: any
@@ -21,6 +22,19 @@ Description: maintain multipath block device access
  .
  If you install this package you may have to change the way you address block
  devices. See README.Debian for details.
+
+Package: multipath-tools-dbg
+Architecture: any
+Section: debug
+Depends: ${misc:Depends}, multipath-tools (= ${binary:Version}), kpartx (= ${binary:Version})
+Description: maintain multipath block device access - debugging symbols
+ These tools are in charge of maintaining the disk multipath device maps and
+ react to path and map events.
+ .
+ If you install this package you may have to change the way you address block
+ devices. See README.Debian for details.
+ .
+ This package includes the debugging symbols
 
 Package: kpartx
 Architecture: any
@@ -47,11 +61,11 @@ Description: Support booting from multipath devices
  Don't install this package if you're not booting from a multipath device.
 
 Package: multipath-udeb
-XC-Package-Type: udeb
+Package-Type: udeb
 Architecture: any
-Depends: ${shlibs:Depends}, multipath-modules
+Depends: ${shlibs:Depends}, ${misc:Depends}, multipath-modules
 Section: debian-installer
-Description: maintain multipath block device access
+Description: maintain multipath block device access - udeb package
  This is a udeb, or a microdeb, for the debian-installer.
  .
  These tools are in charge of maintaining the disk multipath device maps and

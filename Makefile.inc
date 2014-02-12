@@ -1,6 +1,6 @@
 # Makefile.inc
 #
-# Copyright (C) 2004 Christophe Varoqui, <christophe.varoqui@free.fr>
+# Copyright (C) 2004 Christophe Varoqui, <christophe.varoqui@opensvc.com>
 
 #
 # Allow to force some libraries to be used statically. (Uncomment one of the
@@ -31,6 +31,7 @@ man5dir     = $(prefix)/usr/share/man/man5
 rcdir	    = $(prefix)/etc/init.d
 syslibdir   = $(prefix)/$(LIB)
 libdir	    = $(prefix)/$(LIB)/multipath
+unitdir     = $(prefix)/lib/systemd/system
 
 GZIP        = /bin/gzip -9 -c
 INSTALL_PROGRAM = install

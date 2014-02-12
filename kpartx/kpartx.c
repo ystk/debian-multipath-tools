@@ -30,7 +30,6 @@
 #include <sys/types.h>
 #include <ctype.h>
 #include <libdevmapper.h>
-#include <linux/kdev_t.h>
 
 #include "devmapper.h"
 #include "crc32.h"
@@ -49,7 +48,7 @@
 
 struct slice slices[MAXSLICES];
 
-enum action { LIST, ADD, DELETE };
+enum action { LIST, ADD, DELETE, UPDATE };
 
 struct pt {
 	char *type;
@@ -83,20 +82,26 @@ initpts(void)
 	addpts("sun", read_sun_pt);
 }
 
-static char short_opts[] = "ladgvp:t:";
+static char short_opts[] = "rladfgvp:t:su";
 
 /* Used in gpt.c */
 int force_gpt=0;
 
+int force_devmap=0;
+
 static int
 usage(void) {
-	printf("usage : kpartx [-a|-d|-l] [-v] wholedisk\n");
+	printf("usage : kpartx [-a|-d|-l] [-f] [-v] wholedisk\n");
 	printf("\t-a add partition devmappings\n");
+	printf("\t-r devmappings will be readonly\n");
 	printf("\t-d del partition devmappings\n");
+	printf("\t-u update partition devmappings\n");
 	printf("\t-l list partitions devmappings that would be added by -a\n");
 	printf("\t-p set device name-partition number delimiter\n");
 	printf("\t-g force GUID partition table (GPT)\n");
+	printf("\t-f force devmap create\n");
 	printf("\t-v verbose\n");
+	printf("\t-s sync mode. Don't return until the partitions are created\n");
 	return 1;
 }
 
@@ -185,7 +190,8 @@ get_hotplug_device(void)
 
 int
 main(int argc, char **argv){
-	int fd, i, j, m, n, op, off, arg, c, d;
+	int i, j, m, n, op, off, arg, c, d, ro=0;
+	int fd = -1;
 	struct slice all;
 	struct pt *ptp;
 	enum action what = LIST;
@@ -199,7 +205,9 @@ main(int argc, char **argv){
 	int loopro = 0;
 	int hotplug = 0;
 	int loopcreated = 0;
+	int sync = 0;
 	struct stat buf;
+	uint32_t cookie = 0;
 
 	initpts();
 	init_crc32();
@@ -231,6 +239,12 @@ main(int argc, char **argv){
 	}
 
 	while ((arg = getopt(argc, argv, short_opts)) != EOF) switch(arg) {
+		case 'r':
+			ro=1;
+			break;
+		case 'f':
+			force_devmap=1;
+			break;
 		case 'g':
 			force_gpt=1;
 			break;
@@ -252,12 +266,23 @@ main(int argc, char **argv){
 		case 'd':
 			what = DELETE;
 			break;
+		case 's':
+			sync = 1;
+			break;
+		case 'u':
+			what = UPDATE;
+			break;
 		default:
 			usage();
 			exit(1);
 	}
 
-	if (dm_prereq(DM_TARGET, 0, 0, 0) && (what == ADD || what == DELETE)) {
+#ifdef LIBDM_API_COOKIE
+	if (!sync)
+		dm_udev_set_sync_support(0);
+#endif
+
+	if (dm_prereq(DM_TARGET, 0, 0, 0) && (what == ADD || what == DELETE || what == UPDATE)) {
 		fprintf(stderr, "device mapper prerequisites not met\n");
 		exit(1);
 	}
@@ -318,6 +343,12 @@ main(int argc, char **argv){
 
 	if (!mapname)
 		mapname = device + off;
+	else if (!force_devmap &&
+		 dm_no_partitions((unsigned int)MAJOR(buf.st_rdev),
+				  (unsigned int)MINOR(buf.st_rdev))) {
+		/* Feature 'no_partitions' is set, return */
+		return 0;
+	}
 
 	fd = open(device, O_RDONLY);
 
@@ -342,8 +373,10 @@ main(int argc, char **argv){
 			printf("%s: %d slices\n", ptp->type, n);
 #endif
 
-		if (n > 0)
+		if (n > 0) {
 			close(fd);
+			fd = -1;
+		}
 		else
 			continue;
 
@@ -391,15 +424,6 @@ main(int argc, char **argv){
 					break;
 			}
 
-			if (loopcreated && S_ISREG (buf.st_mode)) {
-				if (del_loop(device)) {
-					if (verbose)
-						printf("can't del loop : %s\n",
-							device);
-					exit(1);
-				}
-				printf("loop deleted : %s\n", device);
-			}
 			break;
 
 		case DELETE:
@@ -414,8 +438,8 @@ main(int argc, char **argv){
 				if (!slices[j].size || !dm_map_present(partname))
 					continue;
 
-				if (!dm_simplecmd(DM_DEVICE_REMOVE,
-							partname, 0)) {
+				if (!dm_simplecmd(DM_DEVICE_REMOVE, partname,
+						  0, &cookie)) {
 					r++;
 					continue;
 				}
@@ -435,6 +459,8 @@ main(int argc, char **argv){
 			break;
 
 		case ADD:
+		case UPDATE:
+			/* ADD and UPDATE share the same code that adds new partitions. */
 			for (j = 0, c = 0; j < n; j++) {
 				if (slices[j].size == 0)
 					continue;
@@ -462,16 +488,16 @@ main(int argc, char **argv){
 					DM_DEVICE_RELOAD : DM_DEVICE_CREATE);
 
 				if (!dm_addmap(op, partname, DM_TARGET, params,
-					       slices[j].size, uuid, j+1,
+					       slices[j].size, ro, uuid, j+1,
 					       buf.st_mode & 0777, buf.st_uid,
-					       buf.st_gid)) {
+					       buf.st_gid, &cookie)) {
 					fprintf(stderr, "create/reload failed on %s\n",
 						partname);
 					r++;
 				}
 				if (op == DM_DEVICE_RELOAD &&
-				    !dm_simplecmd(DM_DEVICE_RESUME,
-							partname, 1)) {
+				    !dm_simplecmd(DM_DEVICE_RESUME, partname,
+						  1, &cookie)) {
 					fprintf(stderr, "resume failed on %s\n",
 						partname);
 					r++;
@@ -489,6 +515,7 @@ main(int argc, char **argv){
 			d = c;
 			while (c) {
 				for (j = 0; j < n; j++) {
+					uint64_t start;
 					int k = slices[j].container - 1;
 
 					if (slices[j].size == 0)
@@ -499,7 +526,7 @@ main(int argc, char **argv){
 						continue;
 
 					/* Skip all simple slices */
-					if (k < 0)
+					if (slices[j].container == 0)
 						continue;
 
 					/* Check container slice */
@@ -514,10 +541,11 @@ main(int argc, char **argv){
 					}
 					strip_slash(partname);
 
+					start = slices[j].start - slices[k].start;
 					if (safe_sprintf(params, "%d:%d %" PRIu64,
 							 slices[k].major,
 							 slices[k].minor,
-							 slices[j].start)) {
+							 start)) {
 						fprintf(stderr, "params too small\n");
 						exit(1);
 					}
@@ -526,13 +554,15 @@ main(int argc, char **argv){
 					      DM_DEVICE_RELOAD : DM_DEVICE_CREATE);
 
 					dm_addmap(op, partname, DM_TARGET, params,
-						  slices[j].size, uuid, j+1,
+						  slices[j].size, ro, uuid, j+1,
 						  buf.st_mode & 0777,
-						  buf.st_uid, buf.st_gid);
+						  buf.st_uid, buf.st_gid,
+						  &cookie);
 
 					if (op == DM_DEVICE_RELOAD)
 						dm_simplecmd(DM_DEVICE_RESUME,
-							     partname, 1);
+							     partname, 1,
+							     &cookie);
 
 					dm_devn(partname, &slices[j].major,
 						&slices[j].minor);
@@ -547,7 +577,31 @@ main(int argc, char **argv){
 				if (d == c)
 					break;
 			}
-			break;
+
+			if (what == ADD) {
+				/* Skip code that removes devmappings for deleted partitions */
+				break;
+			}
+
+			for (j = MAXSLICES-1; j >= 0; j--) {
+				if (safe_sprintf(partname, "%s%s%d",
+					     mapname, delim, j+1)) {
+					fprintf(stderr, "partname too small\n");
+					exit(1);
+				}
+				strip_slash(partname);
+
+				if (slices[j].size || !dm_map_present(partname))
+					continue;
+
+				if (!dm_simplecmd(DM_DEVICE_REMOVE,
+						  partname, 1, &cookie)) {
+					r++;
+					continue;
+				}
+				if (verbose)
+					printf("del devmap : %s\n", partname);
+			}
 
 		default:
 			break;
@@ -556,6 +610,20 @@ main(int argc, char **argv){
 		if (n > 0)
 			break;
 	}
+	if (what == LIST && loopcreated && S_ISREG (buf.st_mode)) {
+		if (fd != -1)
+			close(fd);
+		if (del_loop(device)) {
+			if (verbose)
+				printf("can't del loop : %s\n",
+					device);
+			exit(1);
+		}
+		printf("loop deleted : %s\n", device);
+	}
+#ifdef LIBDM_API_COOKIE
+	dm_udev_wait(cookie);
+#endif
 	dm_lib_release();
 	dm_lib_exit();
 

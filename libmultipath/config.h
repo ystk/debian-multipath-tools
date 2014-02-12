@@ -2,6 +2,7 @@
 #define _CONFIG_H
 
 #include <sys/types.h>
+#include <stdint.h>
 
 #define ORIGIN_DEFAULT 0
 #define ORIGIN_CONFIG  1
@@ -23,14 +24,19 @@ struct hwentry {
 	char * selector;
 	char * checker_name;
 	char * prio_name;
+	char * prio_args;
+	char * alias_prefix;
 
 	int pgpolicy;
 	int pgfailback;
 	int rr_weight;
 	int no_path_retry;
 	int minio;
+	int minio_rq;
 	int pg_timeout;
 	int flush_on_last_del;
+	int fast_io_fail;
+	unsigned int dev_loss;
 	char * bl_product;
 };
 
@@ -39,12 +45,16 @@ struct mpentry {
 	char * alias;
 	char * getuid;
 	char * selector;
+	char * features;
 
+	char * prio_name;
+	char * prio_args;
 	int pgpolicy;
 	int pgfailback;
 	int rr_weight;
 	int no_path_retry;
 	int minio;
+	int minio_rq;
 	int pg_timeout;
 	int flush_on_last_del;
 	int attribute_flags;
@@ -54,6 +64,7 @@ struct mpentry {
 };
 
 struct config {
+	int dmrq;
 	int verbosity;
 	int dry_run;
 	int list;
@@ -62,6 +73,7 @@ struct config {
 	int pgpolicy;
 	enum devtypes dev_type;
 	int minio;
+	int minio_rq;
 	int checkint;
 	int max_checkint;
 	int pgfailback;
@@ -69,15 +81,24 @@ struct config {
 	int rr_weight;
 	int no_path_retry;
 	int user_friendly_names;
+	int bindings_read_only;
 	int pg_timeout;
 	int max_fds;
 	int force_reload;
+	int queue_without_daemon;
+	int checker_timeout;
 	int daemon;
 	int flush_on_last_del;
 	int attribute_flags;
+	int fast_io_fail;
+	unsigned int dev_loss;
+	int log_checker_err;
+	int allow_queueing;
 	uid_t uid;
 	gid_t gid;
 	mode_t mode;
+	uint32_t cookie;
+	int reassign_maps;
 
 	char * dev;
 	char * sysfs_dir;
@@ -89,7 +110,9 @@ struct config {
 	char * hwhandler;
 	char * bindings_file;
 	char * prio_name;
+	char * prio_args;
 	char * checker_name;
+	char * alias_prefix;
 
 	vector keywords;
 	vector mptable;

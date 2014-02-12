@@ -28,11 +28,13 @@ int sysfs_get_dev (struct sysfs_device * dev, char * buff, size_t len);
 int path_discovery (vector pathvec, struct config * conf, int flag);
 
 int do_tur (char *);
-int devt2devname (char *, char *);
 int path_offline (struct path *);
+int get_state (struct path * pp, int daemon);
 int pathinfo (struct path *, vector hwtable, int mask);
 struct path * store_pathinfo (vector pathvec, vector hwtable,
 			      char * devname, int flag);
+int sysfs_set_scsi_tmo (struct multipath *mpp);
+int sysfs_get_timeout(struct sysfs_device *dev, unsigned int *timeout);
 
 /*
  * discovery bitmask

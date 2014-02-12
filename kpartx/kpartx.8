@@ -17,8 +17,14 @@ creation and deletion.
 .B \-a
 Add partition mappings
 .TP
+.B \-r
+Readonly partition mappings
+.TP
 .B \-d
 Delete partition mappings
+.TP
+.B \-u
+Update partition mappings
 .TP
 .B \-l
 List partition mappings that would be added -a
@@ -26,11 +32,37 @@ List partition mappings that would be added -a
 .B \-p
 set device name-partition number delimiter
 .TP
+.B \-f
+force creation of mappings; overrides 'no_partitions' feature
+.TP
 .B \-g
 force GUID partition table (GPT)
 .TP
 .B \-v
 Operate verbosely
+.TP
+.B \-s
+Sync mode. Don't return until the partitions are created
+.SH EXAMPLE
+To mount all the partitions in a raw disk image:
+.IP
+kpartx -av disk.img
+.PP
+This will output lines such as:
+.IP
+loop3p1 : 0 20964762 /dev/loop3 63
+.PP
+The 
+.I loop3p1
+is the name of a device file under 
+.I /dev/mapper
+which you can use to access the partition, for example to fsck it:
+.IP
+fsck /dev/mapper/loop3p1
+.PP
+When you're done, you need to remove the devices:
+.IP
+kpartx -d disk.img
 .SH "SEE ALSO"
 .BR multipath (8)
 .BR multipathd (8)
@@ -38,5 +70,5 @@ Operate verbosely
 .SH "AUTHORS"
 This man page was assembled By Patrick Caulfield
 for the Debian project. From documentation provided
-by the multipath author Christophe Varoqui, <christophe.varoqui@free.fr> and others.
+by the multipath author Christophe Varoqui, <christophe.varoqui@opensvc.com> and others.
 

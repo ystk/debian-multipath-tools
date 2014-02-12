@@ -1,6 +1,6 @@
 # Makefile
 #
-# Copyright (C) 2007 Christophe Varoqui, <christophe.varoqui@free.fr>
+# Copyright (C) 2007 Christophe Varoqui, <christophe.varoqui@opensvc.com>
 #
 include ../../Makefile.inc
 
@@ -11,18 +11,21 @@ LIBS = \
 	libprioemc.so \
 	libpriordac.so \
 	libprioalua.so \
-	libprionetapp.so \
-	libpriohds.so
+	libprioontap.so \
+	libpriodatacore.so \
+	libpriohds.so \
+	libprioweightedpath.so \
+	libprioiet.so
 
 CFLAGS += -I..
 
 all: $(LIBS)
 
 libprioalua.so: alua.o alua_rtpg.o
-	$(CC) $(SHARED_FLAGS) -o $@ $^
+	$(CC) $(LDFLAGS) $(SHARED_FLAGS) -o $@ $^
 
 libprio%.so: %.o
-	$(CC) $(SHARED_FLAGS) -o $@ $^
+	$(CC) $(LDFLAGS) $(SHARED_FLAGS) -o $@ $^
 
 install: $(LIBS)
 	$(INSTALL_PROGRAM) -m 755 libprio*.so $(DESTDIR)$(libdir)

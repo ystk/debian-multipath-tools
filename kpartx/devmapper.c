@@ -7,12 +7,19 @@
 #include <stdint.h>
 #include <libdevmapper.h>
 #include <ctype.h>
-#include <linux/kdev_t.h>
 #include <errno.h>
 #include "devmapper.h"
 
 #define UUID_PREFIX "part%d-"
 #define MAX_PREFIX_LEN 8
+#define PARAMS_SIZE 1024
+
+#ifndef LIBDM_API_COOKIE
+static inline int dm_task_set_cookie(struct dm_task *dmt, uint32_t *c, int a)
+{
+	return 1;
+}
+#endif
 
 extern int
 dm_prereq (char * str, int x, int y, int z)
@@ -53,8 +60,10 @@ dm_prereq (char * str, int x, int y, int z)
 }
 
 extern int
-dm_simplecmd (int task, const char *name, int no_flush) {
+dm_simplecmd (int task, const char *name, int no_flush, uint32_t *cookie) {
 	int r = 0;
+	int udev_wait_flag = (task == DM_DEVICE_RESUME ||
+			      task == DM_DEVICE_REMOVE);
 	struct dm_task *dmt;
 
 	if (!(dmt = dm_task_create(task)))
@@ -69,6 +78,8 @@ dm_simplecmd (int task, const char *name, int no_flush) {
 	if (no_flush)
 		dm_task_no_flush(dmt);
 
+	if (udev_wait_flag && !dm_task_set_cookie(dmt, cookie, 0))
+		goto out;
 	r = dm_task_run(dmt);
 
 	out:
@@ -78,8 +89,8 @@ dm_simplecmd (int task, const char *name, int no_flush) {
 
 extern int
 dm_addmap (int task, const char *name, const char *target,
-	   const char *params, uint64_t size, const char *uuid, int part,
-	   mode_t mode, uid_t uid, gid_t gid) {
+	   const char *params, uint64_t size, int ro, const char *uuid, int part,
+	   mode_t mode, uid_t uid, gid_t gid, uint32_t *cookie) {
 	int r = 0;
 	struct dm_task *dmt;
 	char *prefixed_uuid = NULL;
@@ -92,6 +103,9 @@ dm_addmap (int task, const char *name, const char *target,
 
 	if (!dm_task_add_target (dmt, 0, size, target, params))
 		goto addout;
+
+	if (ro && !dm_task_set_ro (dmt))
+			goto addout;
 
 	if (task == DM_DEVICE_CREATE && uuid) {
 		prefixed_uuid = malloc(MAX_PREFIX_LEN + strlen(uuid) + 1);
@@ -114,6 +128,8 @@ dm_addmap (int task, const char *name, const char *target,
 
 	dm_task_no_open_count(dmt);
 
+	if (task == DM_DEVICE_CREATE && !dm_task_set_cookie(dmt, cookie, 0))
+		goto addout;
 	r = dm_task_run (dmt);
 
 	addout:
@@ -263,3 +279,62 @@ out:
 	return r;
 }
 
+int
+dm_get_map(int major, int minor, char * outparams)
+{
+	int r = 1;
+	struct dm_task *dmt;
+	void *next = NULL;
+	uint64_t start, length;
+	char *target_type = NULL;
+	char *params = NULL;
+
+	if (!(dmt = dm_task_create(DM_DEVICE_TABLE)))
+		return 1;
+
+	dm_task_set_major(dmt, major);
+	dm_task_set_minor(dmt, minor);
+	dm_task_no_open_count(dmt);
+
+	if (!dm_task_run(dmt))
+		goto out;
+
+	/* Fetch 1st target */
+	next = dm_get_next_target(dmt, next, &start, &length,
+				  &target_type, &params);
+
+	if (snprintf(outparams, PARAMS_SIZE, "%s", params) <= PARAMS_SIZE)
+		r = 0;
+out:
+	dm_task_destroy(dmt);
+	return r;
+}
+
+#define FEATURE_NO_PART "no_partitions"
+
+int
+dm_no_partitions(int major, int minor)
+{
+	char params[PARAMS_SIZE], *ptr;
+	int i, num_features;
+
+	if (dm_get_map(major, minor, params))
+		return 0;
+
+	ptr = params;
+	num_features = strtoul(params, &ptr, 10);
+	if ((ptr == params) || num_features == 0) {
+		/* No features found, return success */
+		return 0;
+	}
+	for (i = 0; (i < num_features); i++) {
+		if (!ptr || ptr > params + strlen(params))
+			break;
+		/* Skip whitespaces */
+		while(ptr && *ptr == ' ') ptr++;
+		if (!strncmp(ptr, FEATURE_NO_PART, strlen(FEATURE_NO_PART)))
+			return 1;
+		ptr = strchr(ptr, ' ');
+	}
+	return 0;
+}

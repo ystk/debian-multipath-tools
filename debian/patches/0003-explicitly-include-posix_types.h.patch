@@ -9,10 +9,10 @@ Closes: #558990
  kpartx/lopart.c |   13 +------------
  1 files changed, 1 insertions(+), 12 deletions(-)
 
-diff --git a/kpartx/lopart.c b/kpartx/lopart.c
-index 79d8328..570c8ad 100644
---- a/kpartx/lopart.c
-+++ b/kpartx/lopart.c
+Index: mpath/kpartx/lopart.c
+===================================================================
+--- mpath.orig/kpartx/lopart.c	2012-02-09 18:02:23.808800332 +0530
++++ mpath/kpartx/lopart.c	2012-02-09 18:15:24.400671080 +0530
 @@ -26,18 +26,7 @@
  #include <sys/stat.h>
  #include <sys/mman.h>
@@ -33,4 +33,3 @@ index 79d8328..570c8ad 100644
  #include <linux/loop.h>
  
  #include "lopart.h"
--- 

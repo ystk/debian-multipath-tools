@@ -14,6 +14,13 @@ case "$1" in
 	if dpkg --compare-versions "$2" lt "0.4.8-7"; then
 	    [ -e /etc/rcS.d/S04multipath-tools-boot ] && rm /etc/rcS.d/S04multipath-tools-boot
 	fi
+	if dpkg --compare-versions "$2" lt "0.4.9"; then
+	    if [ -e /var/lib/multipath/bindings ]; then
+	        echo "Moving bindings file to /etc/multipath/"
+	        mkdir -p /etc/multipath/
+	        mv /var/lib/multipath/bindings /etc/multipath/
+	    fi
+	fi
     ;;
 
     abort-upgrade)

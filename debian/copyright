@@ -7,6 +7,6 @@ libsysfs is licensed under the GNU LGPL version 2.1 or later.
 libdevmapper is licensed under the GNU LGPL version 2.
 
 On Debian systems, the complete text of the GNU General Public License
-and of the GNU Lesser Public License can be found in
-/usr/share/common-licenses/GPL and /usr/share/common-licenses/LGPL .
+and of the GNU Lesser General Public License can be found in
+/usr/share/common-licenses/GPL-2 and /usr/share/common-licenses/LGPL-2 .
 

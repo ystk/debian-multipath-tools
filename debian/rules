@@ -1,7 +1,5 @@
 #!/usr/bin/make -f
 
-include /usr/share/quilt/quilt.make
-
 INITRAMFS=$(CURDIR)/debian/multipath-tools-boot/usr/share/initramfs-tools/
 
 ifeq (,$(findstring nostrip,$(DEB_BUILD_OPTIONS)))
@@ -20,10 +18,14 @@ endif
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-build: build-stamp
-build-stamp: patch
-	dh_testdir
+build: build-arch build-indep
 
+build-arch: build-stamp
+build-indep: build-stamp
+
+build-stamp:
+	dh_testdir
+	
 	$(MAKE) $(OPTFLAGS) LIB=lib
 
 	touch $@
@@ -31,7 +33,7 @@ build-stamp: patch
 clean-tree:
 	$(MAKE) clean
 
-clean: clean-tree unpatch
+clean: clean-tree
 	dh_testdir
 	rm -f build-stamp
 	dh_clean
@@ -51,6 +53,8 @@ install:
 	install -D -m 755 debian/initramfs/hooks $(INITRAMFS)/hooks/multipath
 	install -D -m 755 debian/initramfs/local-top \
 		$(INITRAMFS)/scripts/local-top/multipath
+	install -D -m 755 debian/initramfs/init-top \
+		$(INITRAMFS)/scripts/init-top/multipath
 	# reportbug:
 	for pkg in "multipath-tools" "multipath-tools-boot"; do \
 	    install -D -m 755 debian/reportbug/script debian/$${pkg}/usr/share/bug/$${pkg}/script; \
@@ -75,7 +79,7 @@ binary-arch: build install
 	dh_installman
 	dh_makeshlibs --add-udeb=multipath-udeb
 	dh_link
-	dh_strip
+	dh_strip --dbg-package=multipath-tools-dbg
 	dh_compress
 	dh_fixperms
 	dh_installdeb

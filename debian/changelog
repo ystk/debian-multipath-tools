@@ -1,3 +1,149 @@
+multipath-tools (0.4.9+git0.4dfdaf2b-7~deb7u2) stable-proposed-updates; urgency=low
+
+  * Non-maintainer upload.
+  * Restore "dmsetup export" workaround for Debian.
+    The hunk using /lib/udev/dmsetup_env to gather device-mapper information
+    needed was lost in the -7 Debian revision upload. Restore the udev rule
+    based on the upstream one.
+    Revert copying of kpartx/kpartx.rules from upstream sources.
+    (Closes: #726296, #726311)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Mon, 14 Oct 2013 16:06:08 +0200
+
+multipath-tools (0.4.9+git0.4dfdaf2b-7~deb7u1) stable-proposed-updates; urgency=low
+
+  * 0.4.9+git0.4dfdaf2b-7~deb7u1 for Wheezy multipath updates 
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 01 Jul 2013 12:07:59 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-7) unstable; urgency=low
+
+  * [8c5d841] Fix upstream copy of kpartx rules (Closes: #618700)
+  * [a3a6c10] Call PREREQS before calling scripts/functions.
+    Thanks to Guy Rossin, Michael Prokop
+  * [7572c53] Don't plain exit if root is on multipath device.
+    Thanks to Guy Rossin (Closes: #704073)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Tue, 11 Jun 2013 00:14:50 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-6) unstable; urgency=low
+
+  * [821cc20] Don't fail if no dm aware (root) device is reported
+    (Closes: #674733)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 28 May 2012 18:19:12 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-5) unstable; urgency=low
+
+  * [08990d2] Fix root device detection syntax.
+    Thanks to Bernhard Reutner-Fischer (Closes: #674029)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Sun, 27 May 2012 08:36:40 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-4) unstable; urgency=low
+
+  * [8ab1022] Fix path scope in initscript to accomodate awk from /usr
+    (Closes: #663662)
+  * [aa5ff3f] Use correct po filename for Brazilian translations.
+    Thanks to Adriano Rafael Gomes (Closes: #664371)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Sat, 28 Apr 2012 20:21:38 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-3) unstable; urgency=low
+
+  * [d46bb8f] Fix hardening build flags (Closes: #657848)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 12 Mar 2012 20:53:46 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-2) unstable; urgency=low
+
+  * Upload to unstable
+  * [4e3eedb] Drop syslog loggin in initrd.
+    Thanks to Martin Sofaru (Closes: #661597)
+  * [787ad2a] Enable hardening build flags.
+    Thanks to Moritz Muehlenhoff (Closes: #657848)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 05 Mar 2012 23:30:52 +0530
+
+multipath-tools (0.4.9+git0.4dfdaf2b-1) experimental; urgency=low
+
+  * [6771cd8] Don't stop multipathd if root is on a multipathed device
+    (Closes: #632124)
+  * [6a08452] Add Dutch Translation.
+    Thanks to Jeroen Schot (Closes: #655459)
+  * [e7fc772] Imported Upstream version 0.4.9+git0.4dfdaf2b
+  * [43d3f10] Fix slow discovery of multipath devices.
+    Thanks to Laurent Bigonville, Frido Roose (Closes: 646900)
+  * Dropped Patches
+    [37827c5] 0002-Make-user_friendly_names-compatible-to-multipath-too.patch
+  * Patches merged upstream
+    [2ac8eb8] 0004-add-r-to-make-resulting-device-read-only.patch
+    [6eee19a] 0008-kpartx-example-manpage.patch
+  * [3a81caa] Refresh patch 0007-do-not-link-against-ncurses.patch
+  * [e6f9cdc] install systemd example service under docs
+  * [0f87973] add build-arch and build-indep targets
+  * [9d94c2d] fix license name in copyright
+  * [7884ddc] some more spelling and hyphentation fixes
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Fri, 10 Feb 2012 18:25:29 +0530
+
+multipath-tools (0.4.9-3) unstable; urgency=low
+
+  * [dd85b8b] Add example to kpartx manpage. Committed upstream.
+    Thanks to Lars Wirzenius (Closes: 637538)
+  * [652acf5] Add Brazilian Portuguese debconf templates translation.
+    Thanks to Flamarion Jorge (Closes: 640802)
+  * [71df377] Add Danish translation of the debconf templates multipath-tools.
+    Thanks to Joe Hansen (Closes: #628225)
+  * [19ab90f] Avoid unnecessary linkage to ncurses library.
+    Thanks to Sven Joachim (Closes: 646148)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Sat, 03 Dec 2011 19:34:59 +0530
+
+multipath-tools (0.4.9-2) unstable; urgency=low
+
+  * [2544655] wait harder for multipath init. Thanks to Serge Hallyn for
+    the patch
+  * [eb87e52] switch to 3.0 quilt source format
+  * [e55a306] explictly mention license copyright
+  * [52db82f] update vcs headers
+  * [8313f77] with dpkg > 1.15.7 we now don't need XC
+  * [8fdf077] update short description for multipath udeb package
+  * [c409ef3] add misc:Depends for multipath-udeb
+  * [c890181] take maintenance of package (Closes: #607911)
+  * [09bbbc8] add debugging symbols package. Thanks to Craig Magina.
+    (Closes: #609068)
+  * [2e6f8a7] spelling/hyphen fixes
+  * [97e02e7] add manpage for read-only mappings
+  * [5419352] add-r-to-make-resulting-device-read-only. Thanks to Wakko Warner
+    for the patch (Closes: #504678)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Sat, 05 Mar 2011 03:22:32 +0530
+
+multipath-tools (0.4.9-1) unstable; urgency=low
+
+  [ Guido Günther ]
+  * New upstream version 0.4.9 (Closes: #587315, #595127)
+  * [500e341] Don't fail "mulitipath-tools start" if multipathd is
+    already running (Closes: #587678)
+  * [f4e697c] Drop upstream patches:
+      * 0001-Fix-udev-rules-for-dmraid.patch
+      * 0003-fix-URL-to-FAQ.patch
+      * 0004-check-header-file-for-defintion-of-dm_task_no_flush.patch
+      * 0005-set-a-soname.patch
+      * 0006-add-library-dependencies.patch
+      * 0007-multipath-tools-rdac-path-checked-leads-to-I-O-hang-.patch
+      * 0010-Dots-are-special-in-groff.patch
+      * 0011-multipath-fix-offset-for-containted-slices.patch
+  * [678dcb6] Bindings file moved to /etc/multipath
+  * [ac2f9d5] Bump standards version
+  * [baea3a2] Add upstream homepage
+  * [9daa1b8] Remove /usr from $PATH so lintian doesn't assume we're
+    calling scripts from $remove_fs.
+  * [1a3c85e] Update po files
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 01 Sep 2010 15:10:26 +0200
+
 multipath-tools (0.4.8+git0.761c66f-9) unstable; urgency=low
 
   * [0435cc1] Make sure the patchcheckers end up in /lib (Closes: #581377)

@@ -1,11 +1,6 @@
-0001-Fix-udev-rules-for-dmraid.patch
-0002-blacklist-cciss-devices.patch
-0003-fix-URL-to-FAQ.patch
-0004-check-header-file-for-defintion-of-dm_task_no_flush.patch
-0005-set-a-soname.patch
-0006-add-library-dependencies.patch
-0007-multipath-tools-rdac-path-checked-leads-to-I-O-hang-.patch
-0008-Make-user_friendly_names-compatible-to-multipath-too.patch
-0009-explicitly-include-posix_types.h.patch
-0010-Dots-are-special-in-groff.patch
-0011-multipath-fix-offset-for-containted-slices.patch
+0001-blacklist-cciss-devices.patch
+0003-explicitly-include-posix_types.h.patch
+0005-spelling-error-fixes.patch
+0006-read-only-partition-mappings-manpage.patch
+0007-do-not-link-against-ncurses.patch
+0009-hardened-build-flags.patch

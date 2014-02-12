@@ -19,9 +19,9 @@ fi
 
 add_bindings()
 {
-  if [ -r /var/lib/multipath/bindings ]; then 
-      mkdir -p $DESTDIR/var/lib/multipath
-      cp /var/lib/multipath/bindings $DESTDIR/var/lib/multipath/
+  if [ -r /etc/multipath/bindings ]; then
+      mkdir -p $DESTDIR/etc/multipath
+      cp /etc/multipath/bindings $DESTDIR/etc/multipath
   fi
 }
 

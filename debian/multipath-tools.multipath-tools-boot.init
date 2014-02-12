@@ -13,7 +13,7 @@
 # Description:
 ### END INIT INFO
 
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+PATH=/sbin:/bin
 DAEMON=/sbin/multipath
 NAME=multipath-tools-boot
 DESC="Discovering and coalescing multipaths"
