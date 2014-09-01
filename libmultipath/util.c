@@ -10,30 +10,31 @@
 #include "vector.h"
 #include "structs.h"
 
-void
+size_t
 strchop(char *str)
 {
 	int i;
 
 	for (i=strlen(str)-1; i >=0 && isspace(str[i]); --i) ;
 	str[++i] = '\0';
+	return strlen(str);
 }
 
 int
-basenamecpy (char * str1, char * str2, int str2len)
+basenamecpy (const char * str1, char * str2, int str2len)
 {
 	char *p;
 
 	if (!str1 || !strlen(str1))
 		return 0;
 
-	if (strlen(str1) > str2len)
+	if (strlen(str1) >= str2len)
 		return 0;
 
 	if (!str2)
 		return 0;
 
-	p = str1 + (strlen(str1) - 1);
+	p = (char *)str1 + (strlen(str1) - 1);
 
 	while (*--p != '/' && p != str1)
 		continue;
@@ -43,8 +44,7 @@ basenamecpy (char * str1, char * str2, int str2len)
 
 	strncpy(str2, p, str2len);
 	str2[str2len - 1] = '\0';
-	strchop(str2);
-	return strlen(str2);
+	return strchop(str2);
 }
 
 int
@@ -86,7 +86,7 @@ get_word (char * sentence, char ** word)
 	*word = MALLOC(len + 1);
 
 	if (!*word) {
-		condlog(0, "get_word : oom\n");
+		condlog(0, "get_word : oom");
 		return 0;
 	}
 	strncpy(*word, sentence, len);
@@ -112,8 +112,7 @@ size_t strlcpy(char *dst, const char *src, size_t size)
 		bytes++;
 	}
 
-	/* If size == 0 there is no space for a final null... */
-	if (size)
+	if (bytes == size)
 		*q = '\0';
 	return bytes;
 }
@@ -142,15 +141,6 @@ size_t strlcat(char *dst, const char *src, size_t size)
 	return bytes;
 }
 
-void remove_trailing_chars(char *path, char c)
-{
-	size_t len;
-
-	len = strlen(path);
-	while (len > 0 && path[len-1] == c)
-		path[--len] = '\0';
-}
-
 extern int
 devt2devname (char *devname, int devname_len, char *devt)
 {
@@ -161,6 +151,7 @@ devt2devname (char *devname, int devname_len, char *devt)
 	struct stat statbuf;
 
 	memset(block_path, 0, sizeof(block_path));
+	memset(dev, 0, sizeof(dev));
 	if (sscanf(devt, "%u:%u", &major, &minor) != 2) {
 		condlog(0, "Invalid device number %s", devt);
 		return 1;
@@ -172,13 +163,13 @@ devt2devname (char *devname, int devname_len, char *devt)
 	if (stat("/sys/dev/block", &statbuf) == 0) {
 		/* Newer kernels have /sys/dev/block */
 		sprintf(block_path,"/sys/dev/block/%u:%u", major, minor);
-		if (stat(block_path, &statbuf) == 0) {
+		if (lstat(block_path, &statbuf) == 0) {
 			if (S_ISLNK(statbuf.st_mode) &&
 			    readlink(block_path, dev, FILE_NAME_SIZE) > 0) {
 				char *p = strrchr(dev, '/');
 
 				if (!p) {
-					condlog(0, "No sysfs entry for %s\n",
+					condlog(0, "No sysfs entry for %s",
 						block_path);
 					return 1;
 				}
@@ -208,7 +199,7 @@ devt2devname (char *devname, int devname_len, char *devt)
 		if ((major == tmpmaj) && (minor == tmpmin)) {
 			if (snprintf(block_path, sizeof(block_path),
 				     "/sys/block/%s", dev) >= sizeof(block_path)) {
-				condlog(0, "device name %s is too long\n", dev);
+				condlog(0, "device name %s is too long", dev);
 				fclose(fd);
 				return 1;
 			}
@@ -218,19 +209,51 @@ devt2devname (char *devname, int devname_len, char *devt)
 	fclose(fd);
 skip_proc:
 	if (strncmp(block_path,"/sys/block", 10)) {
-		condlog(3, "No device found for %u:%u\n", major, minor);
+		condlog(3, "No device found for %u:%u", major, minor);
 		return 1;
 	}
 
 	if (stat(block_path, &statbuf) < 0) {
-		condlog(0, "No sysfs entry for %s\n", block_path);
+		condlog(0, "No sysfs entry for %s", block_path);
 		return 1;
 	}
 
 	if (S_ISDIR(statbuf.st_mode) == 0) {
-		condlog(0, "sysfs entry %s is not a directory\n", block_path);
+		condlog(0, "sysfs entry %s is not a directory", block_path);
 		return 1;
 	}
-	basenamecpy(block_path, devname, devname_len);
+	basenamecpy((const char *)block_path, devname, devname_len);
 	return 0;
+}
+
+/* This function returns a pointer inside of the supplied pathname string.
+ * If is_path_device is true, it may also modify the supplied string */
+char *convert_dev(char *name, int is_path_device)
+{
+	char *ptr;
+
+	if (!name)
+		return NULL;
+	if (is_path_device) {
+		ptr = strstr(name, "cciss/");
+		if (ptr) {
+			ptr += 5;
+			*ptr = '!';
+		}
+	}
+	if (!strncmp(name, "/dev/", 5) && strlen(name) > 5)
+		ptr = name + 5;
+	else
+		ptr = name;
+	return ptr;
+}
+
+dev_t parse_devt(const char *dev_t)
+{
+	int maj, min;
+
+	if (sscanf(dev_t,"%d:%d", &maj, &min) != 2)
+		return 0;
+
+	return makedev(maj, min);
 }

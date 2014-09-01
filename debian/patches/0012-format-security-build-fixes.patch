@@ -1,0 +1,23 @@
+Fix build failure with fomat-security. Specify the format type.
+
+cc -g -O2 -fPIE -fstack-protector --param=ssp-buffer-size=4 -Wformat -Werror=format-security -D_FORTIFY_SOURCE=2 -O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector --param=ssp-buffer-size=4 -Wunused -Wstrict-prototypes -fPIC -DLIB_STRING=\"lib\" -I.. -c -o rdac.o rdac.c
+rdac.c: In function 'libcheck_check':
+rdac.c:311:3: error: format not a string literal and no format arguments [-Werror=format-security]
+   MSG(c, (inqfail) ? MSG_RDAC_DOWN_TYPE("inquiry failed") :
+   ^
+rdac.c:311:3: error: format not a string literal and no format arguments [-Werror=format-security]
+cc1: some warnings being treated as errors
+make[2]: *** [rdac.o] Error 1
+Index: multipath-tools/libmultipath/checkers/rdac.c
+===================================================================
+--- multipath-tools.orig/libmultipath/checkers/rdac.c	2014-02-26 23:17:01.871487504 +0530
++++ multipath-tools/libmultipath/checkers/rdac.c	2014-03-09 15:12:15.228392100 +0530
+@@ -308,7 +308,7 @@
+ done:
+ 	switch (ret) {
+ 	case PATH_DOWN:
+-		MSG(c, (inqfail) ? MSG_RDAC_DOWN_TYPE("inquiry failed") :
++		MSG(c, "%s", (inqfail) ? MSG_RDAC_DOWN_TYPE("inquiry failed") :
+ 			checker_msg_string(&inq));
+ 		break;
+ 	case PATH_UP:

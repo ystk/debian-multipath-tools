@@ -13,6 +13,7 @@
 #include <sys/file.h>
 #include <errno.h>
 #include <libdevmapper.h>
+#include <libudev.h>
 
 #include "checkers.h"
 #include "vector.h"
@@ -36,6 +37,7 @@
 #include "prio.h"
 #include "util.h"
 #include "uxsock.h"
+#include "wwids.h"
 
 extern int
 setup_map (struct multipath * mpp, char * params, int params_size)
@@ -67,12 +69,13 @@ setup_map (struct multipath * mpp, char * params, int params_size)
 	select_rr_weight(mpp);
 	select_minio(mpp);
 	select_no_path_retry(mpp);
-	select_pg_timeout(mpp);
 	select_mode(mpp);
 	select_uid(mpp);
 	select_gid(mpp);
 	select_fast_io_fail(mpp);
 	select_dev_loss(mpp);
+	select_reservation_key(mpp);
+	select_retain_hwhandler(mpp);
 
 	sysfs_set_scsi_tmo(mpp);
 	/*
@@ -150,12 +153,12 @@ static void
 select_action (struct multipath * mpp, vector curmp, int force_reload)
 {
 	struct multipath * cmpp;
+	struct multipath * cmpp_by_name;
 
-	cmpp = find_mp_by_alias(curmp, mpp->alias);
+	cmpp = find_mp_by_wwid(curmp, mpp->wwid);
+	cmpp_by_name = find_mp_by_alias(curmp, mpp->alias);
 
-	if (!cmpp) {
-		cmpp = find_mp_by_wwid(curmp, mpp->wwid);
-
+	if (!cmpp_by_name) {
 		if (cmpp) {
 			condlog(2, "%s: rename %s to %s", mpp->wwid,
 				cmpp->alias, mpp->alias);
@@ -169,14 +172,22 @@ select_action (struct multipath * mpp, vector curmp, int force_reload)
 		return;
 	}
 
-	if (!find_mp_by_wwid(curmp, mpp->wwid)) {
-		condlog(2, "%s: remove (wwid changed)", cmpp->alias);
+	if (!cmpp) {
+		condlog(2, "%s: remove (wwid changed)", mpp->alias);
 		dm_flush_map(mpp->alias);
-		strncpy(cmpp->wwid, mpp->wwid, WWID_SIZE);
-		drop_multipath(curmp, cmpp->wwid, KEEP_PATHS);
+		strncpy(cmpp_by_name->wwid, mpp->wwid, WWID_SIZE);
+		drop_multipath(curmp, cmpp_by_name->wwid, KEEP_PATHS);
 		mpp->action = ACT_CREATE;
 		condlog(3, "%s: set ACT_CREATE (map wwid change)",
 			mpp->alias);
+		return;
+	}
+
+	if (cmpp != cmpp_by_name) {
+		condlog(2, "%s: unable to rename %s to %s (%s is used by %s)",
+			mpp->wwid, cmpp->alias, mpp->alias,
+			mpp->alias, cmpp_by_name->wwid);
+		mpp->action = ACT_NOTHING;
 		return;
 	}
 
@@ -198,7 +209,7 @@ select_action (struct multipath * mpp, vector curmp, int force_reload)
 			mpp->alias);
 		return;
 	}
-	if (!mpp->no_path_retry && !mpp->pg_timeout &&
+	if (!mpp->no_path_retry &&
 	    (strlen(cmpp->features) != strlen(mpp->features) ||
 	     strcmp(cmpp->features, mpp->features))) {
 		mpp->action =  ACT_RELOAD;
@@ -206,8 +217,10 @@ select_action (struct multipath * mpp, vector curmp, int force_reload)
 			mpp->alias);
 		return;
 	}
-	if (!cmpp->selector || strncmp(cmpp->hwhandler, mpp->hwhandler,
-		    strlen(mpp->hwhandler))) {
+	if (mpp->retain_hwhandler != RETAIN_HWHANDLER_ON &&
+            (strlen(cmpp->hwhandler) != strlen(mpp->hwhandler) ||
+	     strncmp(cmpp->hwhandler, mpp->hwhandler,
+		    strlen(mpp->hwhandler)))) {
 		mpp->action = ACT_RELOAD;
 		condlog(3, "%s: set ACT_RELOAD (hwhandler change)",
 			mpp->alias);
@@ -370,24 +383,17 @@ domap (struct multipath * mpp, char * params)
 
 		r = dm_addmap_create(mpp, params);
 
-		if (!r)
-			r = dm_addmap_create_ro(mpp, params);
-
 		lock_multipath(mpp, 0);
 		break;
 
 	case ACT_RELOAD:
 		r = dm_addmap_reload(mpp, params);
-		if (!r)
-			r = dm_addmap_reload_ro(mpp, params);
 		if (r)
 			r = dm_simplecmd_noflush(DM_DEVICE_RESUME, mpp->alias);
 		break;
 
 	case ACT_RESIZE:
 		r = dm_addmap_reload(mpp, params);
-		if (!r)
-			r = dm_addmap_reload_ro(mpp, params);
 		if (r)
 			r = dm_simplecmd_flush(DM_DEVICE_RESUME, mpp->alias, 1);
 		break;
@@ -405,6 +411,8 @@ domap (struct multipath * mpp, char * params)
 		 * DM_DEVICE_CREATE, DM_DEVICE_RENAME, or DM_DEVICE_RELOAD
 		 * succeeded
 		 */
+		if (mpp->action == ACT_CREATE)
+			remember_wwid(mpp->wwid);
 		if (!conf->daemon) {
 			/* multipath client mode */
 			dm_switchgroup(mpp->alias, mpp->bestpg);
@@ -503,7 +511,7 @@ coalesce_paths (struct vectors * vecs, vector newmp, char * refwwid, int force_r
 		/* 1. if path has no unique id or wwid blacklisted */
 		if (memcmp(empty_buff, pp1->wwid, WWID_SIZE) == 0 ||
 		    filter_path(conf, pp1) > 0) {
-			orphan_path(pp1);
+			orphan_path(pp1, "wwid blacklisted");
 			continue;
 		}
 
@@ -513,7 +521,7 @@ coalesce_paths (struct vectors * vecs, vector newmp, char * refwwid, int force_r
 
 		/* 3. if path has disappeared */
 		if (!pp1->size) {
-			orphan_path(pp1);
+			orphan_path(pp1, "invalid size");
 			continue;
 		}
 
@@ -576,6 +584,9 @@ coalesce_paths (struct vectors * vecs, vector newmp, char * refwwid, int force_r
 				   "for create/reload map",
 				mpp->alias, r);
 			if (r == DOMAP_FAIL) {
+				condlog(2, "%s: %s map",
+					mpp->alias, (mpp->action == ACT_CREATE)?
+					"ignoring" : "removing");
 				remove_map(mpp, vecs, 0);
 				continue;
 			} else /* if (r == DOMAP_RETRY) */
@@ -607,12 +618,6 @@ coalesce_paths (struct vectors * vecs, vector newmp, char * refwwid, int force_r
 					add_feature(&mpp->features,
 						    "queue_if_no_path");
 			}
-		}
-		if (mpp->pg_timeout != PGTIMEOUT_UNDEF) {
-			if (mpp->pg_timeout == -PGTIMEOUT_NONE)
-				dm_set_pg_timeout(mpp->alias,  0);
-			else
-				dm_set_pg_timeout(mpp->alias, mpp->pg_timeout);
 		}
 
 		if (!conf->daemon && mpp->action != ACT_NOTHING)
@@ -657,38 +662,50 @@ coalesce_paths (struct vectors * vecs, vector newmp, char * refwwid, int force_r
 	return 0;
 }
 
-extern char *
-get_refwwid (char * dev, enum devtypes dev_type, vector pathvec)
+/*
+ * returns:
+ * 0 - success
+ * 1 - failure
+ * 2 - blacklist
+ */
+extern int
+get_refwwid (char * dev, enum devtypes dev_type, vector pathvec, char **wwid)
 {
+	int ret = 1;
 	struct path * pp;
 	char buff[FILE_NAME_SIZE];
 	char * refwwid = NULL, tmpwwid[WWID_SIZE];
 
+	if (!wwid)
+		return 1;
+	*wwid = NULL;
+
 	if (dev_type == DEV_NONE)
-		return NULL;
+		return 1;
 
 	if (dev_type == DEV_DEVNODE) {
 		if (basenamecpy(dev, buff, FILE_NAME_SIZE) == 0) {
 			condlog(1, "basename failed for '%s' (%s)",
 				dev, buff);
-			return NULL;
+			return 1;
 		}
 
 		pp = find_path_by_dev(pathvec, buff);
 		if (!pp) {
-			pp = alloc_path();
+			struct udev_device *udevice = udev_device_new_from_subsystem_sysname(conf->udev, "block", buff);
 
-			if (!pp)
-				return NULL;
-
-			strncpy(pp->dev, buff, FILE_NAME_SIZE);
-
-			if (pathinfo(pp, conf->hwtable, DI_SYSFS | DI_WWID))
-				return NULL;
-
-			if (store_path(pathvec, pp)) {
-				free_path(pp);
-				return NULL;
+			if (!udevice) {
+				condlog(2, "%s: can't get udev device", buff);
+				return 1;
+			}
+			ret = store_pathinfo(pathvec, conf->hwtable, udevice,
+					     DI_SYSFS | DI_WWID, &pp);
+			udev_device_unref(udevice);
+			if (!pp) {
+				if (ret == 1)
+					condlog(0, "%s can't store path info",
+						buff);
+				return ret;
 			}
 		}
 		refwwid = pp->wwid;
@@ -699,22 +716,20 @@ get_refwwid (char * dev, enum devtypes dev_type, vector pathvec)
 		strchop(dev);
 		pp = find_path_by_devt(pathvec, dev);
 		if (!pp) {
-			if (devt2devname(buff, FILE_NAME_SIZE, dev))
-				return NULL;
+			struct udev_device *udevice = udev_device_new_from_devnum(conf->udev, 'b', parse_devt(dev));
 
-			pp = alloc_path();
-
-			if (!pp)
-				return NULL;
-
-			strncpy(pp->dev, buff, FILE_NAME_SIZE);
-
-			if (pathinfo(pp, conf->hwtable, DI_SYSFS | DI_WWID))
-				return NULL;
-
-			if (store_path(pathvec, pp)) {
-				free_path(pp);
-				return NULL;
+			if (!udevice) {
+				condlog(2, "%s: can't get udev device", dev);
+				return 1;
+			}
+			ret = store_pathinfo(pathvec, conf->hwtable, udevice,
+					     DI_SYSFS | DI_WWID, &pp);
+			udev_device_unref(udevice);
+			if (!pp) {
+				if (ret == 1)
+					condlog(0, "%s can't store path info",
+						buff);
+				return ret;
 			}
 		}
 		refwwid = pp->wwid;
@@ -724,17 +739,17 @@ get_refwwid (char * dev, enum devtypes dev_type, vector pathvec)
 
 		if (((dm_get_uuid(dev, tmpwwid)) == 0) && (strlen(tmpwwid))) {
 			refwwid = tmpwwid;
-			goto out;
+			goto check;
 		}
 
 		/*
 		 * may be a binding
 		 */
-		refwwid = get_user_friendly_wwid(dev,
-						 conf->bindings_file);
-
-		if (refwwid)
-			return refwwid;
+		if (get_user_friendly_wwid(dev, tmpwwid,
+					   conf->bindings_file) == 0) {
+			refwwid = tmpwwid;
+			goto check;
+		}
 
 		/*
 		 * or may be an alias
@@ -746,22 +761,40 @@ get_refwwid (char * dev, enum devtypes dev_type, vector pathvec)
 		 */
 		if (!refwwid)
 			refwwid = dev;
+
+check:
+		if (refwwid && strlen(refwwid)) {
+			if (filter_wwid(conf->blist_wwid, conf->elist_wwid,
+					refwwid) > 0)
+			return 2;
+		}
 	}
 out:
-	if (refwwid && strlen(refwwid))
-		return STRDUP(refwwid);
+	if (refwwid && strlen(refwwid)) {
+		*wwid = STRDUP(refwwid);
+		return 0;
+	}
 
-	return NULL;
+	return 1;
 }
 
-extern int reload_map(struct vectors *vecs, struct multipath *mpp)
+extern int reload_map(struct vectors *vecs, struct multipath *mpp, int refresh)
 {
-	char params[PARAMS_SIZE];
-	int r;
+	char params[PARAMS_SIZE] = {0};
+	struct path *pp;
+	int i, r;
 
 	update_mpp_paths(mpp, vecs->pathvec);
-
-	params[0] = '\0';
+	if (refresh) {
+		vector_foreach_slot (mpp->paths, pp, i) {
+			r = pathinfo(pp, conf->hwtable, DI_PRIO);
+			if (r) {
+				condlog(2, "%s: failed to refresh pathinfo",
+					mpp->alias);
+				return 1;
+			}
+		}
+	}
 	if (setup_map(mpp, params, PARAMS_SIZE)) {
 		condlog(0, "%s: failed to setup map", mpp->alias);
 		return 1;
@@ -779,12 +812,6 @@ extern int reload_map(struct vectors *vecs, struct multipath *mpp)
 			dm_queue_if_no_path(mpp->alias, 0);
 		else
 			dm_queue_if_no_path(mpp->alias, 1);
-	}
-	if (mpp->pg_timeout != PGTIMEOUT_UNDEF) {
-		if (mpp->pg_timeout == -PGTIMEOUT_NONE)
-			dm_set_pg_timeout(mpp->alias,  0);
-		else
-			dm_set_pg_timeout(mpp->alias, mpp->pg_timeout);
 	}
 
 	return 0;

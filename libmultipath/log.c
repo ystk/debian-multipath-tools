@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 
 #include "memory.h"
 #include "log.h"
@@ -94,6 +95,13 @@ void log_close (void)
 	closelog();
 
 	return;
+}
+
+void log_reset (char *program_name)
+{
+	closelog();
+	tzset();
+	openlog(program_name, 0, LOG_DAEMON);
 }
 
 int log_enqueue (int prio, const char * fmt, va_list ap)

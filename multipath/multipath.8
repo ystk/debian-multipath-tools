@@ -5,14 +5,16 @@ multipath \- Device mapper target autoconfig
 .B multipath
 .RB [\| \-v\ \c
 .IR verbosity \|]
+.RB [\| \-b\ \c
+.IR bindings_file \|]
 .RB [\| \-d \|]
-.RB [\| \-h | \-l | \-ll | \-f | \-t | \-F \| \-B \|]
+.RB [\| \-h | \-l | \-ll | \-f | \-t | \-F | \-B | \-c | \-q | \|-r | \-w | \-W \|]
 .RB [\| \-p\ \c
 .BR failover | multibus | group_by_serial | group_by_prio | group_by_node_name \|]
 .RB [\| device \|]
 .SH DESCRIPTION
 .B multipath
-is used to detect multiple paths to devices for fail-over or performance reasons and coalesces them
+is used to detect and coalesce multiple paths to devices, for fail-over or performance reasons.
 .SH OPTIONS
 .TP
 .B \-v " level"
@@ -56,6 +58,22 @@ force devmap reload
 .B \-B
 treat the bindings file as read only
 .TP
+.B \-b " bindings_file"
+set user_friendly_names bindings file location.  The default is
+/etc/multipath/bindings
+.TP
+.B \-c
+check if a block device should be a path in a multipath device
+.TP
+.B \-q
+allow device tables with queue_if_no_path when multipathd is not running
+.TP
+.B \-w
+remove the wwid for the specified device from the wwids file
+.TP
+.B \-W
+reset the wwids file to only include the current multipath devices
+.TP
 .BI \-p " policy"
 force new maps to use the specified policy:
 .RS 1.2i
@@ -80,13 +98,19 @@ in /sys/class/fc_transport/target*/node_name.
 Existing maps are not modified.
 .TP
 .BI device
-update only the devmap the path pointed by
-.I device
-is in. 
-.I device
-is in the /dev/sdb (as shown by udev in the $DEVNAME variable) or major:minor format.
-.I device
-may alternatively be a multipath mapname
+update only the devmap specified by
+.IR device ,
+which is either:
+.RS 1.2i
+.IP \[bu]
+a devmap name
+.IP \[bu]
+a path associated with the desired devmap; the path may be in one of the following formats:
+.RS 1.2i
+.IP \[bu]
+.B /dev/sdb
+.IP \[bu]
+.B major:minor
 .SH "SEE ALSO"
 .BR multipathd (8),
 .BR multipath.conf (5),

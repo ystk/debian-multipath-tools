@@ -1,14 +1,18 @@
 [Unit]
 Description=Device-Mapper Multipath Device Controller
-Before=iscsi.service iscsid.service
+Before=iscsi.service iscsid.service lvm2-activation-early.service
 After=syslog.target
+DefaultDependencies=no
+Conflicts=shutdown.target
 
 [Service]
-Type=forking
-PIDFile=/var/run/multipathd.pid
-ExecStart=/sbin/multipathd
+Type=notify
+NotifyAccess=main
+LimitCORE=infinity
+ExecStartPre=/sbin/modprobe dm-multipath
+ExecStart=/sbin/multipathd -d -s
 ExecReload=/sbin/multipathd reconfigure
-#ExecStop=/path/to/scrip delete-me if not necessary
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sysinit.target
+Also=multipathd.socket

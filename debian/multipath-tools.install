@@ -1,5 +1,8 @@
 /sbin/multi*
+/sbin/mpathpersist
 /lib/multipath/*
 /lib/libmultipath.so.*
+/lib/libmpathpersist.so*
 /usr/share/man/man*/multi*gz
-/lib/systemd/system/multipathd.service	/usr/share/doc/multipath-tools
+/usr/share/man/man*/mpath*gz
+/usr/include/mpath_persist.h

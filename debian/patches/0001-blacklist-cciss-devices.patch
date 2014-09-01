@@ -9,12 +9,12 @@ Closes: #500991
  libmultipath/blacklist.c |    6 ++++++
  1 files changed, 6 insertions(+), 0 deletions(-)
 
-diff --git a/libmultipath/blacklist.c b/libmultipath/blacklist.c
-index f369517..2e5efc8 100644
---- a/libmultipath/blacklist.c
-+++ b/libmultipath/blacklist.c
-@@ -121,6 +121,12 @@ setup_default_blist (struct config * conf)
- 	if (store_ble(conf->blist_devnode, str, ORIGIN_DEFAULT))
+Index: multipath-tools/libmultipath/blacklist.c
+===================================================================
+--- multipath-tools.orig/libmultipath/blacklist.c	2013-11-05 12:39:41.943310397 +0530
++++ multipath-tools/libmultipath/blacklist.c	2013-11-05 12:39:41.943310397 +0530
+@@ -182,6 +182,12 @@
+ 	if (store_ble(conf->elist_property, str, ORIGIN_DEFAULT))
  		return 1;
  
 +	str = STRDUP("^cciss!c[0-9]d[0-9]*");
@@ -25,5 +25,4 @@ index f369517..2e5efc8 100644
 +
  	vector_foreach_slot (conf->hwtable, hwe, i) {
  		if (hwe->bl_product) {
- 			if (alloc_ble_device(conf->blist_device))
--- 
+ 			if (_blacklist_device(conf->blist_device, hwe->vendor,

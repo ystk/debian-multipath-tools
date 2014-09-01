@@ -1,0 +1,13 @@
+Index: multipath-tools/libmpathpersist/Makefile
+===================================================================
+--- multipath-tools.orig/libmpathpersist/Makefile	2014-03-09 15:19:28.008384474 +0530
++++ multipath-tools/libmpathpersist/Makefile	2014-03-09 15:20:51.344383005 +0530
+@@ -20,7 +20,7 @@
+ 
+ $(LIBS): 
+ 	$(CC) -Wall -fPIC -c $(CFLAGS) *.c 
+-	$(CC)  -shared $(LIBDEPS) -Wl,-soname=$@ $(CFLAGS) -o $@ $(OBJS)
++	$(CC)  -fPIC -shared $(LIBDEPS) -Wl,-soname=$@ $(CFLAGS) -o $@ $(OBJS)
+ 	ln -s $(LIBS) $(DEVLIB)
+ 	$(GZIP) mpath_persistent_reserve_in.3 > mpath_persistent_reserve_in.3.gz	
+ 	$(GZIP) mpath_persistent_reserve_out.3 > mpath_persistent_reserve_out.3.gz	

@@ -3,11 +3,13 @@
 
 #include <sys/types.h>
 
+#include "prio.h"
+
 #define WWID_SIZE		128
 #define SERIAL_SIZE		65
 #define NODE_NAME_SIZE		224
 #define PATH_STR_SIZE		16
-#define PARAMS_SIZE		1024
+#define PARAMS_SIZE		4096
 #define FILE_NAME_SIZE		256
 #define CALLOUT_MAX_SIZE	256
 #define BLK_DEV_SIZE		33
@@ -18,7 +20,7 @@
 #define SCSI_VENDOR_SIZE	9
 #define SCSI_PRODUCT_SIZE	17
 #define SCSI_REV_SIZE		5
-#define SCSI_STATE_SIZE		9
+#define SCSI_STATE_SIZE		19
 
 #define NO_PATH_RETRY_UNDEF	0
 #define NO_PATH_RETRY_FAIL	-1
@@ -39,7 +41,8 @@ enum rr_weight_mode {
 enum failback_mode {
 	FAILBACK_UNDEF,
 	FAILBACK_MANUAL,
-	FAILBACK_IMMEDIATE
+	FAILBACK_IMMEDIATE,
+	FAILBACK_FOLLOWOVER
 };
 
 enum sysfs_buses {
@@ -64,9 +67,9 @@ enum pgstates {
 };
 
 enum queue_without_daemon_states {
-	QUE_NO_DAEMON_UNDEF,
 	QUE_NO_DAEMON_OFF,
 	QUE_NO_DAEMON_ON,
+	QUE_NO_DAEMON_FORCE,
 };
 
 enum pgtimeouts {
@@ -92,10 +95,35 @@ enum log_checker_err_states {
 	LOG_CHKR_ERR_ONCE,
 };
 
-struct scsi_idlun {
-	int dev_id;
-	int host_unique_id;
-	int host_no;
+enum user_friendly_names_states {
+	USER_FRIENDLY_NAMES_UNDEF,
+	USER_FRIENDLY_NAMES_OFF,
+	USER_FRIENDLY_NAMES_ON,
+};
+
+enum retain_hwhandler_states {
+	RETAIN_HWHANDLER_UNDEF,
+	RETAIN_HWHANDLER_OFF,
+	RETAIN_HWHANDLER_ON,
+};
+
+enum detect_prio_states {
+	DETECT_PRIO_UNDEF,
+	DETECT_PRIO_OFF,
+	DETECT_PRIO_ON,
+};
+
+enum scsi_protocol {
+	SCSI_PROTOCOL_FCP = 0,	/* Fibre Channel */
+	SCSI_PROTOCOL_SPI = 1,	/* parallel SCSI */
+	SCSI_PROTOCOL_SSA = 2,	/* Serial Storage Architecture - Obsolete */
+	SCSI_PROTOCOL_SBP = 3,	/* firewire */
+	SCSI_PROTOCOL_SRP = 4,	/* Infiniband RDMA */
+	SCSI_PROTOCOL_ISCSI = 5,
+	SCSI_PROTOCOL_SAS = 6,
+	SCSI_PROTOCOL_ADT = 7,	/* Media Changers */
+	SCSI_PROTOCOL_ATA = 8,
+	SCSI_PROTOCOL_UNSPEC = 0xf, /* No specific protocol */
 };
 
 struct sg_id {
@@ -105,20 +133,8 @@ struct sg_id {
 	int lun;
 	short h_cmd_per_lun;
 	short d_queue_depth;
-	int unused1;
-	int unused2;
-};
-
-struct scsi_dev {
-	char dev[FILE_NAME_SIZE];
-	struct scsi_idlun scsi_id;
-	int host_no;
-};
-
-struct sysfs_device {
-	struct sysfs_device *parent;		/* parent device */
-	char devpath[PATH_SIZE];
-	char kernel[NAME_SIZE];			/* device instance name */
+	enum scsi_protocol proto_id;
+	int transport_id;
 };
 
 # ifndef HDIO_GETGEO
@@ -131,11 +147,11 @@ struct hd_geometry {
       unsigned long start;
 };
 #endif
+
 struct path {
 	char dev[FILE_NAME_SIZE];
 	char dev_t[BLK_DEV_SIZE];
-	struct sysfs_device *sysdev;
-	struct scsi_idlun scsi_id;
+	struct udev_device *udev;
 	struct sg_id sg_id;
 	struct hd_geometry geom;
 	char wwid[WWID_SIZE];
@@ -151,11 +167,15 @@ struct path {
 	int offline;
 	int state;
 	int dmstate;
+	int chkrstate;
 	int failcount;
 	int priority;
 	int pgindex;
+	int detect_prio;
+	char * uid_attribute;
 	char * getuid;
-	struct prio * prio;
+	struct prio prio;
+	char * prio_args;
 	struct checker checker;
 	struct multipath * mpp;
 	int fd;
@@ -182,10 +202,10 @@ struct multipath {
 	int no_path_retry; /* number of retries after all paths are down */
 	int retry_tick;    /* remaining times for retries */
 	int minio;
-	int pg_timeout;
 	int flush_on_last_del;
 	int attribute_flags;
 	int fast_io_fail;
+	int retain_hwhandler;
 	unsigned int dev_loss;
 	uid_t uid;
 	gid_t gid;
@@ -216,6 +236,10 @@ struct multipath {
 
 	/* checkers shared data */
 	void * mpcontext;
+	
+	/* persistent management data*/
+	unsigned char * reservation_key;
+	unsigned char prflag;
 };
 
 struct pathgroup {

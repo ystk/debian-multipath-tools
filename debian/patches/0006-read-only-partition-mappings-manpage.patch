@@ -1,11 +1,11 @@
 add patch for read-only device mappings. already accepted upstream
-Index: mpath/kpartx/kpartx.8
+Index: multipath-tools/kpartx/kpartx.8
 ===================================================================
---- mpath.orig/kpartx/kpartx.8	2012-02-09 18:16:13.768915882 +0530
-+++ mpath/kpartx/kpartx.8	2012-02-09 18:16:22.888961105 +0530
+--- multipath-tools.orig/kpartx/kpartx.8	2013-11-05 12:41:21.399308644 +0530
++++ multipath-tools/kpartx/kpartx.8	2013-11-05 12:41:21.395308644 +0530
 @@ -20,6 +20,9 @@
  .B \-r
- Readonly partition mappings
+ Read-only partition mappings
  .TP
 +.B \-r
 +Read-only partition mappings

@@ -1,0 +1,23 @@
+Fix spelling errors
+Index: multipath-tools/multipath/multipath.conf.5
+===================================================================
+--- multipath-tools.orig/multipath/multipath.conf.5	2014-02-26 23:17:01.875487504 +0530
++++ multipath-tools/multipath/multipath.conf.5	2014-03-09 16:17:05.532323544 +0530
+@@ -426,7 +426,7 @@
+ Regular expression of the device nodes to be excluded.
+ .TP
+ .B property
+-Regular expresion of the udev property to be excluded.
++Regular expression of the udev property to be excluded.
+ .TP
+ .B device
+ Subsection for the device description. This subsection recognizes the
+@@ -453,7 +453,7 @@
+ The \fIWorld Wide Identification\fR of a device.
+ .TP
+ .B property
+-Regular expresion of the udev property to be whitelisted. Defaults to
++Regular expression of the udev property to be whitelisted. Defaults to
+ .I (ID_WWN|ID_SCSI_VPD)
+ .TP
+ .B devnode

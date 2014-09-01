@@ -1,8 +1,8 @@
 #! /bin/sh
 ### BEGIN INIT INFO
 # Provides:          multipath-tools
-# Required-Start:    udev $local_fs $syslog
-# Required-Stop:     udev $local_fs $syslog
+# Required-Start:    udev $local_fs $remote_fs $syslog
+# Required-Stop:     udev $local_fs $remote_fs $syslog
 # Should-Start:      iscsi
 # Should-Stop:       iscsi
 # Default-Start:     2 3 4 5
@@ -81,6 +81,11 @@ case "$1" in
 		log_end_msg $?
 	fi
 	;;
+  status)
+	log_daemon_msg "Status $DESC" "$NAME"
+	start-stop-daemon --oknodo --status --quiet --pidfile /var/run/$NAME.pid --exec $DAEMON -- $DAEMON_OPTS
+	log_end_msg $?
+	;;
   reload|force-reload)
 	log_daemon_msg "Reloading $DESC" "$NAME"
 	start-stop-daemon --stop --signal 1 --quiet --pidfile /var/run/$NAME.pid --exec $DAEMON
@@ -93,7 +98,7 @@ case "$1" in
 	;;
   *)
 	N=/etc/init.d/multipath-tools
-	echo "Usage: $N {start|stop|restart|reload|force-reload}" >&2
+	echo "Usage: $N {start|stop|status|restart|reload|force-reload}" >&2
 	exit 1
 	;;
 esac

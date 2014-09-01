@@ -13,6 +13,18 @@ Note: While widely used (including the Debian Installer, which depends on it),
 user_friendly_names can lead to locking issues with large numbers of LUNs
 resulting in some maps not having friendly_names [1].
 
+Note: The mpathN <-> wwwn name mapping created by the user_friendly_names
+feature can change unexpectedly across reboots. A more stable solution for
+'friendly' names is to make explicit aliases in multipath.conf, e.g.
+  multipaths {
+      multipath {
+          wwwid 2226f000123deadbf
+          alias diskbox1-lun0
+      }
+  }
+This device should be accessible as /dev/mapper/diskbox1-lun0.
+
+
 Where did my FC-connected filesystem go?
 ========================================
 If you were previously mounting a device connected to your system by

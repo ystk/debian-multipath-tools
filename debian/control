@@ -3,9 +3,9 @@ Section: admin
 Priority: extra
 Maintainer: Debian LVM Team <pkg-lvm-maintainers@lists.alioth.debian.org>
 Uploaders: Guido Günther <agx@sigxcpu.org>, Ritesh Raj Sarraf <rrs@debian.org>
-Build-Depends: debhelper (>= 5.0.45), po-debconf, libdevmapper-dev (>= 2:1.02.20), libreadline-dev, libaio-dev
-Vcs-Git: git://git.debian.org/git/pkg-lvm/multipath-tools.git
-Vcs-Browser: http://git.debian.org/?p=pkg-lvm/multipath-tools.git
+Build-Depends: debhelper (>= 5.0.45), po-debconf, libdevmapper-dev (>= 2:1.02.20), libreadline-dev, libaio-dev, dpkg-dev (>= 1.16.1~), libudev-dev
+Vcs-Git: git://anonscm.debian.org/pkg-lvm/multipath-tools.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-lvm/multipath-tools.git
 Standards-Version: 3.9.1
 Homepage: http://christophe.varoqui.free.fr/
 
@@ -13,7 +13,7 @@ Package: multipath-tools
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, udev (>= 0.124), initscripts (>= 2.85-16),
  kpartx (>= ${binary:Version}), lsb-base (>= 3), libaio1 (>= 0.3.106-8)
-Conflicts: multipath-tools-initramfs (<= 1.0.1),
+Breaks: multipath-tools-initramfs (<= 1.0.1),
  multipath-tools-boot (<= 0.4.8+git0.761c66f-2~)
 Suggests: multipath-tools-boot
 Description: maintain multipath block device access
@@ -49,7 +49,7 @@ Architecture: all
 Depends: ${misc:Depends}, initramfs-tools, 
  multipath-tools (>= ${source:Version}), multipath-tools (<< ${source:Version}.1~)
 Replaces: multipath-tools-initramfs (<< 1.0.1+nmu1)
-Conflicts: multipath-tools-initramfs (<< 1.0.1+nmu1)
+Breaks: multipath-tools-initramfs (<< 1.0.1+nmu1)
 Description: Support booting from multipath devices
  This package contains the necessary support for booting from a multipath
  device:

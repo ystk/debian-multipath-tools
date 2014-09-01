@@ -26,7 +26,7 @@ alloc_handler (void)
 }
 
 static int
-add_key (vector vec, char * str, int code, int has_param)
+add_key (vector vec, char * str, unsigned long code, int has_param)
 {
 	struct key * kw;
 
@@ -57,7 +57,7 @@ out:
 }
 
 int
-add_handler (int fp, int (*fn)(void *, char **, int *, void *))
+add_handler (unsigned long fp, int (*fn)(void *, char **, int *, void *))
 {
 	struct handler * h;
 
@@ -79,7 +79,7 @@ add_handler (int fp, int (*fn)(void *, char **, int *, void *))
 }
 
 static struct handler *
-find_handler (int fp)
+find_handler (unsigned long fp)
 {
 	int i;
 	struct handler *h;
@@ -92,7 +92,7 @@ find_handler (int fp)
 }
 
 int
-set_handler_callback (int fp, int (*fn)(void *, char **, int *, void *))
+set_handler_callback (unsigned long fp, int (*fn)(void *, char **, int *, void *))
 {
 	struct handler * h = find_handler(fp);
 
@@ -162,6 +162,7 @@ load_keys (void)
 	r += add_key(keys, "resize", RESIZE, 0);
 	r += add_key(keys, "reset", RESET, 0);
 	r += add_key(keys, "reload", RELOAD, 0);
+	r += add_key(keys, "forcequeueing", FORCEQ, 0);
 	r += add_key(keys, "disablequeueing", DISABLEQ, 0);
 	r += add_key(keys, "restorequeueing", RESTOREQ, 0);
 	r += add_key(keys, "paths", PATHS, 0);
@@ -184,6 +185,9 @@ load_keys (void)
 	r += add_key(keys, "quit", QUIT, 0);
 	r += add_key(keys, "exit", QUIT, 0);
 	r += add_key(keys, "shutdown", SHUTDOWN, 0);
+	r += add_key(keys, "getprstatus", GETPRSTATUS, 0);
+	r += add_key(keys, "setprstatus", SETPRSTATUS, 0);
+	r += add_key(keys, "unsetprstatus", UNSETPRSTATUS, 0);
 
 	if (r) {
 		free_keys(keys);
@@ -288,11 +292,11 @@ out:
 	return r;
 }
 
-static int
+static unsigned long 
 fingerprint(vector vec)
 {
 	int i;
-	int fp = 0;
+	unsigned long fp = 0;
 	struct key * kw;
 
 	if (!vec)
@@ -332,7 +336,7 @@ static char *
 genhelp_handler (void)
 {
 	int i, j;
-	int fp;
+	unsigned long fp;
 	struct handler * h;
 	struct key * kw;
 	char * reply;
@@ -399,7 +403,7 @@ parse_cmd (char * cmd, char ** reply, int * len, void * data)
 }
 
 char *
-get_keyparam (vector v, int code)
+get_keyparam (vector v, unsigned long code)
 {
 	struct key * kw;
 	int i;
@@ -453,6 +457,11 @@ cli_init (void) {
 	add_handler(FAIL+PATH, NULL);
 	add_handler(QUIT, NULL);
 	add_handler(SHUTDOWN, NULL);
+	add_handler(GETPRSTATUS+MAP, NULL);
+	add_handler(SETPRSTATUS+MAP, NULL);
+	add_handler(UNSETPRSTATUS+MAP, NULL);
+	add_handler(FORCEQ+DAEMON, NULL);
+	add_handler(RESTOREQ+DAEMON, NULL);
 
 	return 0;
 }
@@ -465,7 +474,7 @@ void cli_exit(void)
 }
 
 static int
-key_match_fingerprint (struct key * kw, int fp)
+key_match_fingerprint (struct key * kw, unsigned long fp)
 {
 	if (!fp)
 		return 0;
@@ -479,7 +488,8 @@ key_match_fingerprint (struct key * kw, int fp)
 char *
 key_generator (const char * str, int state)
 {
-	static int index, len, rlfp, has_param;
+	static int index, len, has_param;
+	static unsigned long rlfp;	
 	struct key * kw;
 	int i;
 	struct handler *h;
@@ -549,7 +559,7 @@ key_generator (const char * str, int state)
 			 * nfp is the candidate fingerprint we try to
 			 * validate against all known command fingerprints.
 			 */
-			int nfp = rlfp | kw->code;
+			unsigned long nfp = rlfp | kw->code;
 			vector_foreach_slot(handlers, h, i) {
 				if (!rlfp || ((h->fingerprint & nfp) == nfp)) {
 					/*

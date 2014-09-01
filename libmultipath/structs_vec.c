@@ -13,7 +13,6 @@
 #include "dmparser.h"
 #include "config.h"
 #include "propsel.h"
-#include "sysfs.h"
 #include "discovery.h"
 #include "prio.h"
 
@@ -69,21 +68,23 @@ adopt_paths (vector pathvec, struct multipath * mpp, int get_info)
 			if (!find_path_by_dev(mpp->paths, pp->dev) &&
 			    store_path(mpp->paths, pp))
 					return 1;
-			if (get_info)
-				pathinfo(pp, conf->hwtable,
-					 DI_PRIO | DI_CHECKER);
+			if (get_info && pathinfo(pp, conf->hwtable,
+						 DI_PRIO | DI_CHECKER))
+				return 1;
 		}
 	}
 	return 0;
 }
 
 extern void
-orphan_path (struct path * pp)
+orphan_path (struct path * pp, const char *reason)
 {
+	condlog(3, "%s: orphan path, %s", pp->dev, reason);
 	pp->mpp = NULL;
 	pp->dmstate = PSTATE_UNDEF;
+	pp->uid_attribute = NULL;
 	pp->getuid = NULL;
-	pp->prio = NULL;
+	prio_put(&pp->prio);
 	checker_put(&pp->checker);
 	if (pp->fd >= 0)
 		close(pp->fd);
@@ -98,8 +99,7 @@ orphan_paths (vector pathvec, struct multipath * mpp)
 
 	vector_foreach_slot (pathvec, pp, i) {
 		if (pp->mpp == mpp) {
-			condlog(4, "%s: orphaned", pp->dev);
-			orphan_path(pp);
+			orphan_path(pp, "map flushed");
 		}
 	}
 }
@@ -107,7 +107,7 @@ orphan_paths (vector pathvec, struct multipath * mpp)
 static void
 set_multipath_wwid (struct multipath * mpp)
 {
-	if (mpp->wwid)
+	if (strlen(mpp->wwid))
 		return;
 
 	dm_get_uuid(mpp->alias, mpp->wwid);
@@ -247,11 +247,15 @@ update_multipath_table (struct multipath *mpp, vector pathvec)
 	if (!mpp)
 		return 1;
 
-	if (dm_get_map(mpp->alias, &mpp->size, params))
+	if (dm_get_map(mpp->alias, &mpp->size, params)) {
+		condlog(3, "%s: cannot get map", mpp->alias);
 		return 1;
+	}
 
-	if (disassemble_map(pathvec, params, mpp))
+	if (disassemble_map(pathvec, params, mpp)) {
+		condlog(3, "%s: cannot disassemble map", mpp->alias);
 		return 1;
+	}
 
 	return 0;
 }
@@ -264,11 +268,15 @@ update_multipath_status (struct multipath *mpp)
 	if (!mpp)
 		return 1;
 
-	if(dm_get_status(mpp->alias, status))
+	if (dm_get_status(mpp->alias, status)) {
+		condlog(3, "%s: cannot get status", mpp->alias);
 		return 1;
+	}
 
-	if (disassemble_status(status, mpp))
+	if (disassemble_status(status, mpp)) {
+		condlog(3, "%s: cannot disassemble status", mpp->alias);
 		return 1;
+	}
 
 	return 0;
 }
@@ -299,8 +307,7 @@ set_no_path_retry(struct multipath *mpp)
 {
 	mpp->retry_tick = 0;
 	mpp->nr_active = pathcount(mpp, PATH_UP) + pathcount(mpp, PATH_GHOST);
-	if (mpp->nr_active > 0)
-		select_no_path_retry(mpp);
+	select_no_path_retry(mpp);
 
 	switch (mpp->no_path_retry) {
 	case NO_PATH_RETRY_UNDEF:
@@ -338,14 +345,14 @@ __setup_multipath (struct vectors * vecs, struct multipath * mpp, int reset)
 		goto out;
 	}
 
-	set_multipath_wwid(mpp);
-	mpp->mpe = find_mpe(mpp->wwid);
-	condlog(3, "%s: discover", mpp->alias);
-
 	if (update_multipath_strings(mpp, vecs->pathvec)) {
 		condlog(0, "%s: failed to setup multipath", mpp->alias);
 		goto out;
 	}
+
+	set_multipath_wwid(mpp);
+	mpp->mpe = find_mpe(mpp->wwid);
+	condlog(3, "%s: discover", mpp->alias);
 
 	if (!mpp->hwe)
 		mpp->hwe = extract_hwe_from_path(mpp);
@@ -357,7 +364,6 @@ __setup_multipath (struct vectors * vecs, struct multipath * mpp, int reset)
 		select_rr_weight(mpp);
 		select_pgfailback(mpp);
 		set_no_path_retry(mpp);
-		select_pg_timeout(mpp);
 		select_flush_on_last_del(mpp);
 	}
 
@@ -441,25 +447,17 @@ verify_paths(struct multipath * mpp, struct vectors * vecs, vector rpvec)
 	if (!mpp)
 		return 0;
 
-	select_features(mpp);
-	select_no_path_retry(mpp);
-	select_dev_loss(mpp);
-	sysfs_set_scsi_tmo(mpp);
-
 	vector_foreach_slot (mpp->paths, pp, i) {
 		/*
 		 * see if path is in sysfs
 		 */
-		if (!pp->sysdev || sysfs_get_dev(pp->sysdev,
-						 pp->dev_t, BLK_DEV_SIZE)) {
+		if (sysfs_get_dev(pp->udev, pp->dev_t, BLK_DEV_SIZE) <= 0) {
 			if (pp->state != PATH_DOWN) {
 				condlog(1, "%s: removing valid path %s in state %d",
-					mpp->alias,
-					pp->sysdev?pp->sysdev->devpath:pp->dev_t, pp->state);
+					mpp->alias, pp->dev, pp->state);
 			} else {
 				condlog(3, "%s: failed to access path %s",
-					mpp->alias,
-					pp->sysdev ? pp->sysdev->devpath : pp->dev_t);
+					mpp->alias, pp->dev);
 			}
 			count++;
 			vector_del_slot(mpp->paths, i);
@@ -491,7 +489,7 @@ int update_multipath (struct vectors *vecs, char *mapname, int reset)
 	mpp = find_mp_by_alias(vecs->mpvec, mapname);
 
 	if (!mpp) {
-		condlog(3, "%s: multipath map not found\n", mapname);
+		condlog(3, "%s: multipath map not found", mapname);
 		return 2;
 	}
 

@@ -1,6 +1,5 @@
 0001-blacklist-cciss-devices.patch
-0003-explicitly-include-posix_types.h.patch
-0005-spelling-error-fixes.patch
-0006-read-only-partition-mappings-manpage.patch
-0007-do-not-link-against-ncurses.patch
 0009-hardened-build-flags.patch
+0011-patch-udev-rule.patch
+0012-format-security-build-fixes.patch
+0013-fix-spelling-error.patch

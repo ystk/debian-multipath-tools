@@ -34,7 +34,7 @@ The configuration file contains entries of the form:
 .LP
 Each \fIsection\fP contains one or more attributes or subsections. The
 recognized keywords for attributes or subsections depend on the
-section in which they occor.
+section in which they occur.
 .LP
 The following \fIsection\fP keywords are recognized:
 .TP 17
@@ -55,8 +55,9 @@ section.
 .TP
 .B multipaths
 This section defines the multipath topologies. They are indexed by a
-\fIWorld Wide Identifier\fR(wwid), which is the result of the
-\fIgetuid_callout\fR program.
+\fIWorld Wide Identifier\fR(wwid), which is taken to be the value of
+the udev attribute given by the
+\fIuid_attribute\fR keyword.
 .TP
 .B devices
 This section defines the device-specific settings.
@@ -70,17 +71,16 @@ section recognizes the following keywords:
 .B polling_interval
 interval between two path checks in seconds. For properly functioning paths,
 the interval between checks will gradually increase to
-.B max_polling_interval;
-default is
+.B max_polling_interval.
+This value will be overridden by the
+.B WatchdogSec
+setting in the multipathd.service definition if systemd is used.
+Default is
 .I 5
 .TP
 .B max_polling_interval
 maximal interval between two path checks in seconds; default is
 .I 4 * polling_interval
-.TP
-.B udev_dir
-directory where udev creates its device nodes; default is
-.I /dev
 .TP
 .B multipath_dir
 directory where the dynamic shared objects are stored; default is system
@@ -139,14 +139,18 @@ per-multipath option in the configuration file.
 1 priority group per target node name. Target node names are fetched
 in /sys/class/fc_transport/target*/node_name.
 .TP
-Default value is \fImultibus\fR.
+Default value is \fIfailover\fR.
 .RE
+.TP
+.B uid_attribute
+The udev attribute providing a unique path
+identifier. Default value is
+.I ID_SERIAL
 .TP
 .B getuid_callout
 The default program and args to callout to obtain a unique path
-identifier. Should be specified with an absolute path. Default value
-is
-.I /lib/udev/scsi_id --whitelisted --replace-whitespace --device=/dev/%n
+identifier. Should be specified with an absolute path.
+This parameter is deprecated; \fIuid_attribute\fR should be used instead.
 .TP
 .B prio
 The name of the path priority routine. The specified routine
@@ -258,6 +262,11 @@ active paths.
 .B manual
 Do not perform automatic failback.
 .TP
+.B followover
+Only perform automatic failback when the first path of a pathgroup
+becomes active. This keeps a node from automatically failing back when
+another node requested the failover.
+.TP
 .B values > 0
 deferred failback (time to defer in seconds)
 .TP
@@ -269,7 +278,7 @@ The number of IO to route to a path before switching to the next in
 the same path group. This is only for BIO based multipath. Default is
 .I 1000
 .TP
-.B rr_min_io_q
+.B rr_min_io_rq
 The number of IO requests to route to a path before switching to the
 next in the same path group. This is only for request based multipath.
 Default is
@@ -289,7 +298,8 @@ Specify the number of retries until disable queueing, or
 .I fail
 for immediate failure (no queueing),
 .I queue
-for never stop queueing. Default is 0.
+for never stop queueing. If unset no queueing is attempted.
+Default is unset.
 .TP
 .B user_friendly_names
 If set to 
@@ -300,7 +310,7 @@ to assign a persistent and unique alias to the multipath, in the form of mpath<n
 If set to 
 .I no
 use the WWID as the alias. In either case this be will
-be overriden by any specific aliases in the \fImultipaths\fR section.
+be overridden by any specific aliases in the \fImultipaths\fR section.
 Default is
 .I no
 .TP
@@ -313,7 +323,7 @@ deleted. Default is
 .TP
 .B max_fds
 Specify the maximum number of file descriptors that can be opened by multipath
-and multipathd.  This is equivalent to ulimit -n. A value of \fImax\fR will set
+and multipathd.  This is equivalent to ulimit \-n. A value of \fImax\fR will set
 this to the system limit from /proc/sys/fs/nr_open. If this is not set, the
 maximum number of open fds is taken from the calling process. It is usually
 1024. To be safe, this should be set to the maximum number of paths plus 32,
@@ -321,7 +331,7 @@ if that number is greated than 1024.
 .TP
 .B checker_timeout
 Specify the timeout to user for path checkers that issue scsi commands with an
-explict timeout, in seconds; default taken from
+explicit timeout, in seconds; default taken from
 .I /sys/block/sd<x>/device/timeout
 .TP
 .B fast_io_fail_tmo
@@ -333,7 +343,15 @@ will disable the timeout.
 .TP
 .B dev_loss_tmo
 Specify the number of seconds the scsi layer will wait after a problem has
-been detected on a FC remote port before removing it from the system.
+been detected on a FC remote port before removing it from the system. This
+can be set to "infinity" which sets it to the max value of 2147483647
+seconds, or 68 years. It will be automatically adjusted to the overall
+retry interval
+\fIno_path_retry\fR * \fIpolling_interval\fR
+if a number of retries is given with \fIno_path_retry\fR and the
+overall retry interval is longer than the specified \fIdev_loss_tmo\fR value.
+The linux kernel will cap this value to \fI300\fR if \fBfast_io_fail_tmo\fR
+is not set.
 .TP
 .B queue_without_daemon
 If set to
@@ -350,7 +368,13 @@ cannot be told to stop queueing IO. Setting queue_without_daemon to
 .TP
 .B bindings_file
 The full pathname of the binding file to be used when the user_friendly_names option is set. Defaults to
-.I /var/lib/multipath/bindings
+.I /etc/multipath/bindings
+.TP
+.B wwids_file
+The full pathname of the wwids file, which is used by multipath to keep track
+of the wwids for LUNs it has created multipath devices on in the past.
+Defaults to
+.I /etc/multipath/wwids
 .TP
 .B log_checker_err
 If set to
@@ -360,6 +384,31 @@ errors are logged at level 3 until the device is restored. If set to
 .I always
 , multipathd always logs the path checker error at logging level 2. Default is
 .I always
+.TP
+.B reservation_key
+This is the service action reservation key used by mpathpersist.  It must be
+set for all multipath devices using persistent reservations, and it must be
+the same as the RESERVATION KEY field of the PERSISTENT RESERVE OUT parameter
+list which contains an 8-byte value provided by the application client to the
+device server to identify the I_T nexus. It is unset by default.
+.TP
+.B retain_attached_hw_handler
+If set to
+.I yes
+and the scsi layer has already attached a hardware_handler to the device,
+multipath will not force the device to use the hardware_handler specified by
+mutipath.conf. If the scsi layer has not attached a hardware handler,
+multipath will continue to use its configured hardware handler. Default is
+.I no
+.TP
+.B detect_prio
+If set to
+.I yes
+, multipath will try to detect if the device supports ALUA. If so, the device
+will automatically use the
+.I alua
+prioritizer. If not, the prioritizer will be selected as usual. Default is
+.I no
 .
 .SH "blacklist section"
 The
@@ -376,6 +425,9 @@ The \fIWorld Wide Identification\fR of a device.
 .B devnode
 Regular expression of the device nodes to be excluded.
 .TP
+.B property
+Regular expresion of the udev property to be excluded.
+.TP
 .B device
 Subsection for the device description. This subsection recognizes the
 .I vendor
@@ -390,7 +442,7 @@ The
 section is used to revert the actions of the
 .I blacklist
 section, ie to include specific device in the
-multipath topology. This allows to selectively include devices which
+multipath topology. This allows one to selectively include devices which
 would normally be excluded via the
 .I blacklist
 section.
@@ -400,8 +452,12 @@ The following keywords are recognized:
 .B wwid
 The \fIWorld Wide Identification\fR of a device.
 .TP
+.B property
+Regular expresion of the udev property to be whitelisted. Defaults to
+.I (ID_WWN|ID_SCSI_VPD)
+.TP
 .B devnode
-Regular expression of the device nodes to be excluded.
+Regular expression of the device nodes to be whitelisted.
 .TP
 .B device
 Subsection for the device description. This subsection recognizes the
@@ -411,6 +467,16 @@ and
 keywords. For a full description of these keywords please see the
 .I devices
 section description.
+.LP
+The
+.I property
+blacklist and whitelist handling is different from the usual handling
+in the sense that the whitelist
+.B has
+to be set, otherwise the device will be blacklisted.
+In these cases the message
+.I blacklisted, udev property missing
+will be displayed.
 .SH "multipaths section"
 The only recognized attribute for the
 .B multipaths
@@ -456,9 +522,11 @@ section:
 .TP
 .B rr_min_io
 .TP
-.B rr_min_io_q
+.B rr_min_io_rq
 .TP
 .B features
+.TP
+.B reservation_key
 .RE
 .PD
 .LP
@@ -518,7 +586,7 @@ section:
 .TP 18
 .B path_grouping_policy
 .TP
-.B getuid_callout
+.B uid_attribute
 .TP
 .B path_selector
 .TP
@@ -545,6 +613,10 @@ section:
 .B dev_loss_tmo
 .TP
 .B flush_on_last_del
+.TP
+.B retain_attached_hw_handler
+.TP
+.B detect_prio
 .RE
 .PD
 .LP

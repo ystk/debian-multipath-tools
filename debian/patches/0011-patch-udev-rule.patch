@@ -1,0 +1,16 @@
+Patch for udev rule. This patch will continue being carried
+Index: multipath-tools/kpartx/kpartx.rules
+===================================================================
+--- multipath-tools.orig/kpartx/kpartx.rules	2013-11-05 12:44:23.487305435 +0530
++++ multipath-tools/kpartx/kpartx.rules	2013-11-05 12:44:23.483305435 +0530
+@@ -7,6 +7,10 @@
+ KERNEL!="dm-*", GOTO="kpartx_end"
+ ACTION=="remove", GOTO="kpartx_end"
+ 
++# This is a temporary hack until Debian's dmsetup properly supports "dmsetup
++# export". For more information see: #434241, #487881, #493078
++IMPORT{program}="dmsetup_env %M %m"
++
+ ENV{DM_TABLE_STATE}!="LIVE", GOTO="kpartx_end"
+ ENV{DM_DEPS}=="0", GOTO="kpartx_end"
+ 

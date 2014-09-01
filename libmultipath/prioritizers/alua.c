@@ -16,6 +16,7 @@
 
 #include <debug.h>
 #include <prio.h>
+#include <structs.h>
 
 #include "alua.h"
 
@@ -107,7 +108,7 @@ int getprio (struct path * pp, char * args)
 			default:
 				rc = 0;
 		}
-		if (priopath)
+		if (priopath && aas != AAS_OPTIMIZED)
 			rc += 80;
 	} else {
 		switch(-rc) {
