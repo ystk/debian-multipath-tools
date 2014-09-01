@@ -17,6 +17,8 @@
 #include "devmapper.h"
 #include "prio.h"
 #include "discovery.h"
+#include "prioritizers/alua_rtpg.h"
+#include <inttypes.h>
 
 pgpolicyfn *pgpolicies[] = {
 	NULL,
@@ -236,6 +238,18 @@ select_alias_prefix (struct multipath * mp)
 		mp->wwid, mp->alias_prefix);
 }
 
+static int
+want_user_friendly_names(struct multipath * mp)
+{
+	if (mp->mpe &&
+	    mp->mpe->user_friendly_names != USER_FRIENDLY_NAMES_UNDEF)
+		return (mp->mpe->user_friendly_names == USER_FRIENDLY_NAMES_ON);
+	if (mp->hwe &&
+	    mp->hwe->user_friendly_names != USER_FRIENDLY_NAMES_UNDEF)
+		return (mp->hwe->user_friendly_names == USER_FRIENDLY_NAMES_ON);
+	return (conf->user_friendly_names  == USER_FRIENDLY_NAMES_ON);
+}
+
 extern int
 select_alias (struct multipath * mp)
 {
@@ -243,13 +257,11 @@ select_alias (struct multipath * mp)
 		mp->alias = STRDUP(mp->mpe->alias);
 	else {
 		mp->alias = NULL;
-		if (conf->user_friendly_names) {
+		if (want_user_friendly_names(mp)) {
 			select_alias_prefix(mp);
 			mp->alias = get_user_friendly_alias(mp->wwid,
 					conf->bindings_file, mp->alias_prefix, conf->bindings_read_only);
 		}
-		if (mp->alias == NULL)
-			mp->alias = dm_get_name(mp->wwid);
 		if (mp->alias == NULL)
 			mp->alias = STRDUP(mp->wwid);
 	}
@@ -269,8 +281,11 @@ select_features (struct multipath * mp)
 	} else if (mp->hwe && mp->hwe->features) {
 		mp->features = STRDUP(mp->hwe->features);
 		origin = "controller setting";
-	} else {
+	} else if (conf->features) {
 		mp->features = STRDUP(conf->features);
+		origin = "config file default";
+	} else {
+		mp->features = set_default(DEFAULT_FEATURES);
 		origin = "internal default";
 	}
 	condlog(3, "%s: features = %s (%s)",
@@ -330,11 +345,11 @@ select_checker(struct path *pp)
 		pp->dev, checker_name(c));
 out:
 	if (conf->checker_timeout) {
-		c->timeout = conf->checker_timeout * 1000;
-		condlog(3, "%s: checker timeout = %u ms (config file default)",
+		c->timeout = conf->checker_timeout;
+		condlog(3, "%s: checker timeout = %u s (config file default)",
 				pp->dev, c->timeout);
 	}
-	else if (sysfs_get_timeout(pp->sysdev, &c->timeout) == 0)
+	else if (sysfs_get_timeout(pp, &c->timeout) > 0)
 		condlog(3, "%s: checker timeout = %u ms (sysfs setting)",
 				pp->dev, c->timeout);
 	else {
@@ -348,42 +363,78 @@ out:
 extern int
 select_getuid (struct path * pp)
 {
+	if (pp->hwe && pp->hwe->uid_attribute) {
+		pp->uid_attribute = pp->hwe->uid_attribute;
+		condlog(3, "%s: uid_attribute = %s (controller setting)",
+			pp->dev, pp->uid_attribute);
+		return 0;
+	}
 	if (pp->hwe && pp->hwe->getuid) {
 		pp->getuid = pp->hwe->getuid;
-		condlog(3, "%s: getuid = %s (controller setting)",
+		condlog(3, "%s: getuid = %s (deprecated) (controller setting)",
 			pp->dev, pp->getuid);
+		return 0;
+	}
+	if (conf->uid_attribute) {
+		pp->uid_attribute = conf->uid_attribute;
+		condlog(3, "%s: uid_attribute = %s (config file default)",
+			pp->dev, pp->uid_attribute);
 		return 0;
 	}
 	if (conf->getuid) {
 		pp->getuid = conf->getuid;
-		condlog(3, "%s: getuid = %s (config file default)",
+		condlog(3, "%s: getuid = %s (deprecated) (config file default)",
 			pp->dev, pp->getuid);
 		return 0;
 	}
-	pp->getuid = STRDUP(DEFAULT_GETUID);
-	condlog(3, "%s: getuid = %s (internal default)",
-		pp->dev, pp->getuid);
+	pp->uid_attribute = STRDUP(DEFAULT_UID_ATTRIBUTE);
+	condlog(3, "%s: uid_attribute = %s (internal default)",
+		pp->dev, pp->uid_attribute);
 	return 0;
+}
+
+void
+detect_prio(struct path * pp)
+{
+	int ret;
+	struct prio *p = &pp->prio;
+
+	if (get_target_port_group_support(pp->fd) <= 0)
+		return;
+	ret = get_target_port_group(pp->fd);
+	if (ret < 0)
+		return;
+	if (get_asymmetric_access_state(pp->fd, ret) < 0)
+		return;
+	prio_get(p, PRIO_ALUA, DEFAULT_PRIO_ARGS);
 }
 
 extern int
 select_prio (struct path * pp)
 {
 	struct mpentry * mpe;
+	struct prio * p = &pp->prio;
+
+	if (pp->detect_prio == DETECT_PRIO_ON) {
+		detect_prio(pp);
+		if (prio_selected(p)) {
+			condlog(3, "%s: prio = %s (detected setting)",
+				pp->dev, prio_name(p));
+			return 0;
+		}
+	}
 
 	if ((mpe = find_mpe(pp->wwid))) {
 		if (mpe->prio_name) {
-			pp->prio = prio_lookup(mpe->prio_name);
-			prio_set_args(pp->prio, mpe->prio_args);
+			prio_get(p, mpe->prio_name, mpe->prio_args);
 			condlog(3, "%s: prio = %s (LUN setting)",
-				pp->dev, pp->prio->name);
+				pp->dev, prio_name(p));
 			return 0;
 		}
 	}
 
 	if (pp->hwe && pp->hwe->prio_name) {
-		pp->prio = prio_lookup(pp->hwe->prio_name);
-		prio_set_args(pp->prio, pp->hwe->prio_args);
+		prio_get(p, pp->hwe->prio_name, pp->hwe->prio_args);
 		condlog(3, "%s: prio = %s (controller setting)",
 			pp->dev, pp->hwe->prio_name);
 		condlog(3, "%s: prio args = %s (controller setting)",
@@ -391,19 +442,17 @@ select_prio (struct path * pp)
 		return 0;
 	}
 	if (conf->prio_name) {
-		pp->prio = prio_lookup(conf->prio_name);
-		prio_set_args(pp->prio, conf->prio_args);
+		prio_get(p, conf->prio_name, conf->prio_args);
 		condlog(3, "%s: prio = %s (config file default)",
 			pp->dev, conf->prio_name);
 		condlog(3, "%s: prio args = %s (config file default)",
 			pp->dev, conf->prio_args);
 		return 0;
 	}
-	pp->prio = prio_lookup(DEFAULT_PRIO);
-	prio_set_args(pp->prio, DEFAULT_PRIO_ARGS);
+	prio_get(p, DEFAULT_PRIO, DEFAULT_PRIO_ARGS);
 	condlog(3, "%s: prio = %s (internal default)",
 		pp->dev, DEFAULT_PRIO);
-	condlog(3, "%s: prio = %s (internal default)",
+	condlog(3, "%s: prio args = %s (internal default)",
 		pp->dev, DEFAULT_PRIO_ARGS);
 	return 0;
 }
@@ -414,6 +463,7 @@ select_no_path_retry(struct multipath *mp)
 	if (mp->flush_on_last_del == FLUSH_IN_PROGRESS) {
 		condlog(0, "flush_on_last_del in progress");
 		mp->no_path_retry = NO_PATH_RETRY_FAIL;
+		return 0;
 	}
 	if (mp->mpe && mp->mpe->no_path_retry != NO_PATH_RETRY_UNDEF) {
 		mp->no_path_retry = mp->mpe->no_path_retry;
@@ -499,71 +549,40 @@ select_minio_bio (struct multipath * mp)
 extern int
 select_minio (struct multipath * mp)
 {
-	if (conf->dmrq)
+	unsigned int minv_dmrq[3] = {1, 1, 0};
+
+	if (VERSION_GE(conf->version, minv_dmrq))
 		return select_minio_rq(mp);
 	else
 		return select_minio_bio(mp);
 }
 
 extern int
-select_pg_timeout(struct multipath *mp)
-{
-	if (mp->mpe && mp->mpe->pg_timeout != PGTIMEOUT_UNDEF) {
-		mp->pg_timeout = mp->mpe->pg_timeout;
-		if (mp->pg_timeout > 0)
-			condlog(3, "%s: pg_timeout = %d (multipath setting)",
-				mp->alias, mp->pg_timeout);
-		else
-			condlog(3, "%s: pg_timeout = NONE (multipath setting)",
-				mp->alias);
-		return 0;
-	}
-	if (mp->hwe && mp->hwe->pg_timeout != PGTIMEOUT_UNDEF) {
-		mp->pg_timeout = mp->hwe->pg_timeout;
-		if (mp->pg_timeout > 0)
-			condlog(3, "%s: pg_timeout = %d (controller setting)",
-				mp->alias, mp->pg_timeout);
-		else
-			condlog(3, "%s: pg_timeout = NONE (controller setting)",
-				mp->alias);
-		return 0;
-	}
-	if (conf->pg_timeout != PGTIMEOUT_UNDEF) {
-		mp->pg_timeout = conf->pg_timeout;
-		if (mp->pg_timeout > 0)
-			condlog(3, "%s: pg_timeout = %d (config file default)",
-				mp->alias, mp->pg_timeout);
-		else
-			condlog(3,
-				"%s: pg_timeout = NONE (config file default)",
-				mp->alias);
-		return 0;
-	}
-	mp->pg_timeout = PGTIMEOUT_UNDEF;
-	condlog(3, "%s: pg_timeout = NONE (internal default)", mp->alias);
-	return 0;
-}
-
-extern int
 select_fast_io_fail(struct multipath *mp)
 {
-	if (mp->hwe && mp->hwe->fast_io_fail) {
+	if (mp->hwe && mp->hwe->fast_io_fail != MP_FAST_IO_FAIL_UNSET) {
 		mp->fast_io_fail = mp->hwe->fast_io_fail;
-		if (mp->fast_io_fail == -1)
-			condlog(3, "%s: fast_io_fail_tmo = off (controller default)", mp->alias);
+		if (mp->fast_io_fail == MP_FAST_IO_FAIL_OFF)
+			condlog(3, "%s: fast_io_fail_tmo = off "
+				"(controller setting)", mp->alias);
 		else
-			condlog(3, "%s: fast_io_fail_tmo = %d (controller default)", mp->alias, mp->fast_io_fail);
+			condlog(3, "%s: fast_io_fail_tmo = %d "
+				"(controller setting)", mp->alias,
+				mp->fast_io_fail == MP_FAST_IO_FAIL_ZERO ? 0 : mp->fast_io_fail);
 		return 0;
 	}
-	if (conf->fast_io_fail) {
+	if (conf->fast_io_fail != MP_FAST_IO_FAIL_UNSET) {
 		mp->fast_io_fail = conf->fast_io_fail;
-		if (mp->fast_io_fail == -1)
-			condlog(3, "%s: fast_io_fail_tmo = off (config file default)", mp->alias);
+		if (mp->fast_io_fail == MP_FAST_IO_FAIL_OFF)
+			condlog(3, "%s: fast_io_fail_tmo = off "
+				"(config file default)", mp->alias);
 		else
-			condlog(3, "%s: fast_io_fail_tmo = %d (config file default)", mp->alias, mp->fast_io_fail);
+			condlog(3, "%s: fast_io_fail_tmo = %d "
+				"(config file default)", mp->alias,
+				mp->fast_io_fail == MP_FAST_IO_FAIL_ZERO ? 0 : mp->fast_io_fail);
 		return 0;
 	}
-	mp->fast_io_fail = 0;
+	mp->fast_io_fail = MP_FAST_IO_FAIL_UNSET;
 	return 0;
 }
 
@@ -593,23 +612,112 @@ select_flush_on_last_del(struct multipath *mp)
 		return 0;
 	if (mp->mpe && mp->mpe->flush_on_last_del != FLUSH_UNDEF) {
 		mp->flush_on_last_del = mp->mpe->flush_on_last_del;
-		condlog(3, "flush_on_last_del = %i (multipath setting)",
-				mp->flush_on_last_del);
+		condlog(3, "%s: flush_on_last_del = %i (multipath setting)",
+			mp->alias, mp->flush_on_last_del);
 		return 0;
 	}
 	if (mp->hwe && mp->hwe->flush_on_last_del != FLUSH_UNDEF) {
 		mp->flush_on_last_del = mp->hwe->flush_on_last_del;
-		condlog(3, "flush_on_last_del = %i (controler setting)",
-				mp->flush_on_last_del);
+		condlog(3, "%s: flush_on_last_del = %i (controler setting)",
+			mp->alias, mp->flush_on_last_del);
 		return 0;
 	}
 	if (conf->flush_on_last_del != FLUSH_UNDEF) {
 		mp->flush_on_last_del = conf->flush_on_last_del;
-		condlog(3, "flush_on_last_del = %i (config file default)",
-				mp->flush_on_last_del);
+		condlog(3, "%s: flush_on_last_del = %i (config file default)",
+			mp->alias, mp->flush_on_last_del);
 		return 0;
 	}
 	mp->flush_on_last_del = FLUSH_UNDEF;
-	condlog(3, "flush_on_last_del = DISABLED (internal default)");
+	condlog(3, "%s: flush_on_last_del = DISABLED (internal default)",
+		mp->alias);
+	return 0;
+}
+
+extern int
+select_reservation_key (struct multipath * mp)
+{
+	int j;
+	unsigned char *keyp;
+	uint64_t prkey = 0;
+
+	mp->reservation_key = NULL;
+
+	if (mp->mpe && mp->mpe->reservation_key) {
+		keyp =  mp->mpe->reservation_key;
+		for (j = 0; j < 8; ++j) {
+			if (j > 0)
+				prkey <<= 8;
+			prkey |= *keyp;
+			++keyp;
+		}
+
+		condlog(3, "%s: reservation_key = 0x%" PRIx64 " "
+				"(multipath setting)",  mp->alias, prkey);
+
+		mp->reservation_key = mp->mpe->reservation_key;
+		return 0;
+	}
+
+	if (conf->reservation_key) {
+		keyp = conf->reservation_key;
+		for (j = 0; j < 8; ++j) {
+			if (j > 0)
+				prkey <<= 8;
+			prkey |= *keyp;
+			++keyp;
+		}
+
+		condlog(3, "%s: reservation_key  = 0x%" PRIx64
+				" (config file default)", mp->alias, prkey);
+
+		mp->reservation_key = conf->reservation_key;
+		return 0;
+	}
+
+	return 0;
+}
+
+extern int
+select_retain_hwhandler (struct multipath * mp)
+{
+	unsigned int minv_dm_retain[3] = {1, 5, 0};
+
+	if (!VERSION_GE(conf->version, minv_dm_retain)) {
+		mp->retain_hwhandler = RETAIN_HWHANDLER_OFF;
+		condlog(3, "%s: retain_attached_hw_handler disabled (requires kernel version >= 1.5.0)", mp->alias);
+		return 0;
+	}
+
+	if (mp->hwe && mp->hwe->retain_hwhandler) {
+		mp->retain_hwhandler = mp->hwe->retain_hwhandler;
+		condlog(3, "%s: retain_attached_hw_handler = %d (controller default)", mp->alias, mp->retain_hwhandler);
+		return 0;
+	}
+	if (conf->retain_hwhandler) {
+		mp->retain_hwhandler = conf->retain_hwhandler;
+		condlog(3, "%s: retain_attached_hw_handler = %d (config file default)", mp->alias, mp->retain_hwhandler);
+		return 0;
+	}
+	mp->retain_hwhandler = 0;
+	condlog(3, "%s: retain_attached_hw_handler = %d (compiled in default)", mp->alias, mp->retain_hwhandler);
+	return 0;
+}
+
+extern int
+select_detect_prio (struct path * pp)
+{
+	if (pp->hwe && pp->hwe->detect_prio) {
+		pp->detect_prio = pp->hwe->detect_prio;
+		condlog(3, "%s: detect_prio = %d (controller default)", pp->dev, pp->detect_prio);
+		return 0;
+	}
+	if (conf->detect_prio) {
+		pp->detect_prio = conf->detect_prio;
+		condlog(3, "%s: detect_prio = %d (config file default)", pp->dev, pp->detect_prio);
+		return 0;
+	}
+	pp->detect_prio = 0;
+	condlog(3, "%s: detect_prio = %d (compiled in default)", pp->dev, pp->detect_prio);
 	return 0;
 }

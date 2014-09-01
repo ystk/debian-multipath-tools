@@ -8,6 +8,7 @@
 #include <structs_vec.h>
 #include <libdevmapper.h>
 #include <devmapper.h>
+#include <discovery.h>
 #include <config.h>
 #include <configure.h>
 #include <blacklist.h>
@@ -15,6 +16,8 @@
 #include <print.h>
 #include <sysfs.h>
 #include <errno.h>
+#include <libudev.h>
+#include <util.h>
 
 #include "main.h"
 #include "cli.h"
@@ -232,6 +235,7 @@ cli_list_map_topology (void * v, char ** reply, int * len, void * data)
 	struct vectors * vecs = (struct vectors *)data;
 	char * param = get_keyparam(v, MAP);
 	
+	param = convert_dev(param, 0);
 	get_path_layout(vecs->pathvec, 0);
 	mpp = find_mp_by_str(vecs->mpvec, param);
 
@@ -410,18 +414,44 @@ cli_add_path (void * v, char ** reply, int * len, void * data)
 {
 	struct vectors * vecs = (struct vectors *)data;
 	char * param = get_keyparam(v, PATH);
+	struct path *pp;
 	int r;
 
+	param = convert_dev(param, 1);
 	condlog(2, "%s: add path (operator)", param);
 
 	if (filter_devnode(conf->blist_devnode, conf->elist_devnode,
-	    param) > 0 || (r = ev_add_path(param, vecs)) == 2) {
-		*reply = strdup("blacklisted\n");
-		*len = strlen(*reply) + 1;
-		condlog(2, "%s: path blacklisted", param);
-		return 0;
+			   param) > 0)
+		goto blacklisted;
+
+	pp = find_path_by_dev(vecs->pathvec, param);
+	if (pp) {
+		condlog(2, "%s: path already in pathvec", param);
+		if (pp->mpp)
+			return 0;
+	} else {
+		struct udev_device *udevice;
+
+		udevice = udev_device_new_from_subsystem_sysname(conf->udev,
+								 "block",
+								 param);
+		r = store_pathinfo(vecs->pathvec, conf->hwtable,
+				   udevice, DI_ALL, &pp);
+		udev_device_unref(udevice);
+		if (!pp) {
+			if (r == 2)
+				goto blacklisted;
+			condlog(0, "%s: failed to store path info", param);
+			return 1;
+		}
+		pp->checkint = conf->checkint;
 	}
-	return r;
+	return ev_add_path(pp, vecs);
+blacklisted:
+	*reply = strdup("blacklisted\n");
+	*len = strlen(*reply) + 1;
+	condlog(2, "%s: path blacklisted", param);
+	return 0;
 }
 
 int
@@ -429,10 +459,16 @@ cli_del_path (void * v, char ** reply, int * len, void * data)
 {
 	struct vectors * vecs = (struct vectors *)data;
 	char * param = get_keyparam(v, PATH);
+	struct path *pp;
 
+	param = convert_dev(param, 1);
 	condlog(2, "%s: remove path (operator)", param);
-
-	return ev_remove_path(param, vecs);
+	pp = find_path_by_dev(vecs->pathvec, param);
+	if (!pp) {
+		condlog(0, "%s: path already removed", param);
+		return 0;
+	}
+	return ev_remove_path(pp, vecs);
 }
 
 int
@@ -445,6 +481,7 @@ cli_add_map (void * v, char ** reply, int * len, void * data)
 	char *alias;
 	int rc;
 
+	param = convert_dev(param, 0);
 	condlog(2, "%s: add map (operator)", param);
 
 	if (filter_wwid(conf->blist_wwid, conf->elist_wwid, param) > 0) {
@@ -485,6 +522,7 @@ cli_del_map (void * v, char ** reply, int * len, void * data)
 	char *alias;
 	int rc;
 
+	param = convert_dev(param, 0);
 	condlog(2, "%s: remove map (operator)", param);
 	minor = dm_get_minor(param);
 	if (minor < 0) {
@@ -516,6 +554,7 @@ cli_reload(void *v, char **reply, int *len, void *data)
 	struct multipath *mpp;
 	int minor;
 
+	mapname = convert_dev(mapname, 0);
 	condlog(2, "%s: reload map (operator)", mapname);
 	if (sscanf(mapname, "dm-%d", &minor) == 1)
 		mpp = find_mp_by_minor(vecs->mpvec, minor);
@@ -527,13 +566,14 @@ cli_reload(void *v, char **reply, int *len, void *data)
 		return 1;
 	}
 
-	return reload_map(vecs, mpp);
+	return reload_map(vecs, mpp, 0);
 }
 
 int resize_map(struct multipath *mpp, unsigned long long size,
 	       struct vectors * vecs)
 {
 	char params[PARAMS_SIZE] = {0};
+	unsigned long long orig_size = mpp->size;
 
 	mpp->size = size;
 	update_mpp_paths(mpp, vecs->pathvec);
@@ -542,6 +582,7 @@ int resize_map(struct multipath *mpp, unsigned long long size,
 	if (domap(mpp, params) <= 0) {
 		condlog(0, "%s: failed to resize map : %s", mpp->alias,
 			strerror(errno));
+		mpp->size = orig_size;
 		return 1;
 	}
 	return 0;
@@ -558,6 +599,7 @@ cli_resize(void *v, char **reply, int *len, void *data)
 	struct pathgroup *pgp;
 	struct path *pp;
 
+	mapname = convert_dev(mapname, 0);
 	condlog(2, "%s: resize map (operator)", mapname);
 	if (sscanf(mapname, "dm-%d", &minor) == 1)
 		mpp = find_mp_by_minor(vecs->mpvec, minor);
@@ -570,8 +612,19 @@ cli_resize(void *v, char **reply, int *len, void *data)
 	}
 
 	pgp = VECTOR_SLOT(mpp->pg, 0);
+
+	if (!pgp){
+		condlog(0, "%s: couldn't get path group. cannot resize",
+			mapname);
+		return 1;
+	}
 	pp = VECTOR_SLOT(pgp->paths, 0);
-	if (sysfs_get_size(pp->sysdev, &size)) {
+
+	if (!pp){
+		condlog(0, "%s: couldn't get path. cannot resize", mapname);
+		return 1;
+	}
+	if (!pp->udev || sysfs_get_size(pp, &size)) {
 		condlog(0, "%s: couldn't get size for sysfs. cannot resize",
 			mapname);
 		return 1;
@@ -588,9 +641,28 @@ cli_resize(void *v, char **reply, int *len, void *data)
 		return 1;
 
 	dm_lib_release();
-	setup_multipath(vecs, mpp);
+	if (setup_multipath(vecs, mpp) != 0)
+		return 1;
 	sync_map_state(mpp);
 
+	return 0;
+}
+
+int
+cli_force_no_daemon_q(void * v, char ** reply, int * len, void * data)
+{
+	condlog(2, "force queue_without_daemon (operator)");
+	if (conf->queue_without_daemon == QUE_NO_DAEMON_OFF)
+		conf->queue_without_daemon = QUE_NO_DAEMON_FORCE;
+	return 0;
+}
+
+int
+cli_restore_no_daemon_q(void * v, char ** reply, int * len, void * data)
+{
+	condlog(2, "restore queue_without_daemon (operator)");
+	if (conf->queue_without_daemon == QUE_NO_DAEMON_FORCE)
+		conf->queue_without_daemon = QUE_NO_DAEMON_OFF;
 	return 0;
 }
 
@@ -602,6 +674,7 @@ cli_restore_queueing(void *v, char **reply, int *len, void *data)
 	struct multipath *mpp;
 	int minor;
 
+	mapname = convert_dev(mapname, 0);
 	condlog(2, "%s: restore map queueing (operator)", mapname);
 	if (sscanf(mapname, "dm-%d", &minor) == 1)
 		mpp = find_mp_by_minor(vecs->mpvec, minor);
@@ -653,6 +726,7 @@ cli_disable_queueing(void *v, char **reply, int *len, void *data)
 	struct multipath *mpp;
 	int minor;
 
+	mapname = convert_dev(mapname, 0);
 	condlog(2, "%s: disable map queueing (operator)", mapname);
 	if (sscanf(mapname, "dm-%d", &minor) == 1)
 		mpp = find_mp_by_minor(vecs->mpvec, minor);
@@ -690,6 +764,7 @@ cli_switch_group(void * v, char ** reply, int * len, void * data)
 	char * mapname = get_keyparam(v, MAP);
 	int groupnum = atoi(get_keyparam(v, GROUP));
 
+	mapname = convert_dev(mapname, 0);
 	condlog(2, "%s: switch to path group #%i (operator)", mapname, groupnum);
 
 	return dm_switchgroup(mapname, groupnum);
@@ -712,6 +787,7 @@ cli_suspend(void * v, char ** reply, int * len, void * data)
 	char * param = get_keyparam(v, MAP);
 	int r = dm_simplecmd_noflush(DM_DEVICE_SUSPEND, param);
 
+	param = convert_dev(param, 0);
 	condlog(2, "%s: suspend (operator)", param);
 
 	if (!r) /* error */
@@ -733,6 +809,7 @@ cli_resume(void * v, char ** reply, int * len, void * data)
 	char * param = get_keyparam(v, MAP);
 	int r = dm_simplecmd_noflush(DM_DEVICE_RESUME, param);
 
+	param = convert_dev(param, 0);
 	condlog(2, "%s: resume (operator)", param);
 
 	if (!r) /* error */
@@ -754,6 +831,7 @@ cli_reinstate(void * v, char ** reply, int * len, void * data)
 	char * param = get_keyparam(v, PATH);
 	struct path * pp;
 
+	param = convert_dev(param, 1);
 	pp = find_path_by_dev(vecs->pathvec, param);
 
 	if (!pp)
@@ -774,6 +852,7 @@ cli_reassign (void * v, char ** reply, int * len, void * data)
 {
 	char * param = get_keyparam(v, MAP);
 
+	param = convert_dev(param, 0);
 	condlog(3, "%s: reset devices (operator)", param);
 
 	dm_reassign(param);
@@ -788,6 +867,7 @@ cli_fail(void * v, char ** reply, int * len, void * data)
 	struct path * pp;
 	int r;
 
+	param = convert_dev(param, 1);
 	pp = find_path_by_dev(vecs->pathvec, param);
 
 	if (!pp)
@@ -888,6 +968,81 @@ int
 cli_shutdown (void * v, char ** reply, int * len, void * data)
 {
 	condlog(3, "shutdown (operator)");
+	exit_daemon();
+	return 0;
+}
 
-	return exit_daemon(0);
+int
+cli_getprstatus (void * v, char ** reply, int * len, void * data)
+{
+	struct multipath * mpp;
+	struct vectors * vecs = (struct vectors *)data;
+	char * param = get_keyparam(v, MAP);
+
+	param = convert_dev(param, 0);
+	get_path_layout(vecs->pathvec, 0);
+	mpp = find_mp_by_str(vecs->mpvec, param);
+
+	if (!mpp)
+		return 1;
+
+	condlog(3, "%s: prflag = %u", param, (unsigned int)mpp->prflag);
+
+	*reply =(char *)malloc(2);
+	*len = 2;
+	memset(*reply,0,2);
+
+
+	sprintf(*reply,"%d",mpp->prflag);
+	(*reply)[1]='\0';
+
+
+	condlog(3, "%s: reply = %s", param, *reply);
+
+	return 0;
+}
+
+int
+cli_setprstatus(void * v, char ** reply, int * len, void * data)
+{
+	struct multipath * mpp;
+	struct vectors * vecs = (struct vectors *)data;
+	char * param = get_keyparam(v, MAP);
+
+	param = convert_dev(param, 0);
+	get_path_layout(vecs->pathvec, 0);
+	mpp = find_mp_by_str(vecs->mpvec, param);
+
+	if (!mpp)
+		return 1;
+
+	if (!mpp->prflag) {
+		mpp->prflag = 1;
+		condlog(2, "%s: prflag set", param);
+	}
+
+
+	return 0;
+}
+
+int
+cli_unsetprstatus(void * v, char ** reply, int * len, void * data)
+{
+	struct multipath * mpp;
+	struct vectors * vecs = (struct vectors *)data;
+	char * param = get_keyparam(v, MAP);
+
+	param = convert_dev(param, 0);
+	get_path_layout(vecs->pathvec, 0);
+	mpp = find_mp_by_str(vecs->mpvec, param);
+
+	if (!mpp)
+		return 1;
+
+	if (mpp->prflag) {
+		mpp->prflag = 0;
+		condlog(2, "%s: prflag unset", param);
+	}
+
+	return 0;
 }

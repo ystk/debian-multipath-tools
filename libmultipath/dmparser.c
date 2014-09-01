@@ -56,6 +56,7 @@ assemble_map (struct multipath * mp, char * params, int len)
 	int nr_priority_groups, initial_pg_nr;
 	char * p, * f;
 	char no_path_retry[] = "queue_if_no_path";
+	char retain_hwhandler[] = "retain_attached_hw_handler";
 	struct pathgroup * pgp;
 	struct path * pp;
 
@@ -81,6 +82,8 @@ assemble_map (struct multipath * mp, char * params, int len)
 	} else {
 		add_feature(&f, no_path_retry);
 	}
+	if (mp->retain_hwhandler == RETAIN_HWHANDLER_ON)
+		add_feature(&f, retain_hwhandler);
 
 	shift = snprintf(p, freechar, "%s %s %i %i",
 			 f, mp->hwhandler,
@@ -100,7 +103,7 @@ assemble_map (struct multipath * mp, char * params, int len)
 		shift = snprintf(p, freechar, " %s %i 1", mp->selector,
 				 VECTOR_SIZE(pgp->paths));
 		if (shift >= freechar) {
-			condlog(0, "%s: params too small\n", mp->alias);
+			condlog(0, "%s: params too small", mp->alias);
 			return 1;
 		}
 		p += shift;
@@ -113,7 +116,7 @@ assemble_map (struct multipath * mp, char * params, int len)
 			    && pp->priority > 0)
 				tmp_minio = minio * pp->priority;
 			if (!strlen(pp->dev_t) ) {
-				condlog(0, "dev_t not set for '%s'\n", pp->dev);
+				condlog(0, "dev_t not set for '%s'", pp->dev);
 				return 1;
 			}
 			shift = snprintf(p, freechar, " %s %d",
@@ -232,13 +235,16 @@ disassemble_map (vector pathvec, char * params, struct multipath * mpp)
 	num_pg = atoi(word);
 	FREE(word);
 
-	if (num_pg > 0 && !mpp->pg) {
-		mpp->pg = vector_alloc();
-
-		if (!mpp->pg)
-			return 1;
-	} else
+	if (num_pg > 0) {
+		if (!mpp->pg) {
+			mpp->pg = vector_alloc();
+			if (!mpp->pg)
+				return 1;
+		}
+	} else {
+		free_pgvec(mpp->pg, KEEP_PATHS);
 		mpp->pg = NULL;
+	}
 
 	/*
 	 * first pg to try
@@ -273,7 +279,6 @@ disassemble_map (vector pathvec, char * params, struct multipath * mpp)
 			num_pg_args = atoi(word);
 
 			if (merge_words(&mpp->selector, word, 1)) {
-				FREE(word);
 				goto out1;
 			}
 			FREE(word);

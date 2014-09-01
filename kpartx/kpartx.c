@@ -26,6 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <ctype.h>
@@ -56,6 +57,7 @@ struct pt {
 } pts[MAXTYPES];
 
 int ptct = 0;
+int udev_sync = 0;
 
 static void
 addpts(char *t, ptreader f)
@@ -80,6 +82,7 @@ initpts(void)
 	addpts("dasd", read_dasd_pt);
 	addpts("mac", read_mac_pt);
 	addpts("sun", read_sun_pt);
+	addpts("ps3", read_ps3_pt);
 }
 
 static char short_opts[] = "rladfgvp:t:su";
@@ -202,10 +205,8 @@ main(int argc, char **argv){
 	char * delim = NULL;
 	char *uuid = NULL;
 	char *mapname = NULL;
-	int loopro = 0;
 	int hotplug = 0;
 	int loopcreated = 0;
-	int sync = 0;
 	struct stat buf;
 	uint32_t cookie = 0;
 
@@ -267,7 +268,7 @@ main(int argc, char **argv){
 			what = DELETE;
 			break;
 		case 's':
-			sync = 1;
+			udev_sync = 1;
 			break;
 		case 'u':
 			what = UPDATE;
@@ -278,7 +279,7 @@ main(int argc, char **argv){
 	}
 
 #ifdef LIBDM_API_COOKIE
-	if (!sync)
+	if (!udev_sync)
 		dm_udev_set_sync_support(0);
 #endif
 
@@ -314,19 +315,13 @@ main(int argc, char **argv){
 		if (!loopdev) {
 			loopdev = find_unused_loop_device();
 
-			if (set_loop(loopdev, device, 0, &loopro)) {
+			if (set_loop(loopdev, device, 0, &ro)) {
 				fprintf(stderr, "can't set up loop\n");
 				exit (1);
 			}
 			loopcreated = 1;
 		}
 		device = loopdev;
-	}
-
-	if (delim == NULL) {
-		delim = malloc(DELIM_SIZE);
-		memset(delim, 0, DELIM_SIZE);
-		set_delimiter(device, delim);
 	}
 
 	off = find_devname_offset(device);
@@ -348,6 +343,12 @@ main(int argc, char **argv){
 				  (unsigned int)MINOR(buf.st_rdev))) {
 		/* Feature 'no_partitions' is set, return */
 		return 0;
+	}
+
+	if (delim == NULL) {
+		delim = malloc(DELIM_SIZE);
+		memset(delim, 0, DELIM_SIZE);
+		set_delimiter(mapname, delim);
 	}
 
 	fd = open(device, O_RDONLY);
@@ -515,7 +516,6 @@ main(int argc, char **argv){
 			d = c;
 			while (c) {
 				for (j = 0; j < n; j++) {
-					uint64_t start;
 					int k = slices[j].container - 1;
 
 					if (slices[j].size == 0)
@@ -541,11 +541,9 @@ main(int argc, char **argv){
 					}
 					strip_slash(partname);
 
-					start = slices[j].start - slices[k].start;
-					if (safe_sprintf(params, "%d:%d %" PRIu64,
-							 slices[k].major,
-							 slices[k].minor,
-							 start)) {
+					if (safe_sprintf(params, "%s %" PRIu64,
+							 device,
+							 slices[j].start)) {
 						fprintf(stderr, "params too small\n");
 						exit(1);
 					}
@@ -696,4 +694,15 @@ getblock (int fd, unsigned int secnr) {
 	}
 
 	return bp->block;
+}
+
+int
+get_sector_size(int filedes)
+{
+	int rc, sector_size = 512;
+
+	rc = ioctl(filedes, BLKSSZGET, &sector_size);
+	if (rc)
+		sector_size = 512;
+	return sector_size;
 }

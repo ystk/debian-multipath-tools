@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <libudev.h>
 
 #include <checkers.h>
 #include <prio.h>
@@ -53,6 +54,7 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <wwids.h>
 #include "dev_t.h"
 
 int logsink;
@@ -82,7 +84,7 @@ usage (char * progname)
 {
 	fprintf (stderr, VERSION_STRING);
 	fprintf (stderr, "Usage:\n");
-	fprintf (stderr, "  %s [-d] [-r] [-v lvl] [-p pol] [-b fil] [-q] [dev]\n", progname);
+	fprintf (stderr, "  %s [-c|-w|-W] [-d] [-r] [-v lvl] [-p pol] [-b fil] [-q] [dev]\n", progname);
 	fprintf (stderr, "  %s -l|-ll|-f [-v lvl] [-b fil] [dev]\n", progname);
 	fprintf (stderr, "  %s -F [-v lvl]\n", progname);
 	fprintf (stderr, "  %s -t\n", progname);
@@ -95,12 +97,16 @@ usage (char * progname)
 		"  -ll     show multipath topology (maximum info)\n" \
 		"  -f      flush a multipath device map\n" \
 		"  -F      flush all multipath device maps\n" \
+		"  -c      check if a device should be a path in a multipath device\n" \
 		"  -q      allow queue_if_no_path when multipathd is not running\n"\
 		"  -d      dry run, do not create or update devmaps\n" \
 		"  -t      dump internal hardware table\n" \
 		"  -r      force devmap reload\n" \
+		"  -B      treat the bindings file as read only\n" \
 		"  -p      policy failover|multibus|group_by_serial|group_by_prio\n" \
 		"  -b fil  bindings file location\n" \
+		"  -w      remove a device from the wwids file\n" \
+		"  -W      reset the wwids file include only the current devices\n" \
 		"  -p pol  force all maps to specified path grouping policy :\n" \
 		"          . failover            one path per priority group\n" \
 		"          . multibus            all paths in one priority group\n" \
@@ -142,20 +148,25 @@ update_paths (struct multipath * mpp)
 					/*
 					 * path is not in sysfs anymore
 					 */
-					pp->state = PATH_DOWN;
+					pp->chkrstate = pp->state = PATH_DOWN;
 					continue;
 				}
 				pp->mpp = mpp;
-				pathinfo(pp, conf->hwtable, DI_ALL);
+				if (pathinfo(pp, conf->hwtable, DI_ALL))
+					pp->state = PATH_UNCHECKED;
 				continue;
 			}
 			pp->mpp = mpp;
 			if (pp->state == PATH_UNCHECKED ||
-			    pp->state == PATH_WILD)
-				pathinfo(pp, conf->hwtable, DI_CHECKER);
+			    pp->state == PATH_WILD) {
+				if (pathinfo(pp, conf->hwtable, DI_CHECKER))
+					pp->state = PATH_UNCHECKED;
+			}
 
-			if (pp->priority == PRIO_UNDEF)
-				pathinfo(pp, conf->hwtable, DI_PRIO);
+			if (pp->priority == PRIO_UNDEF) {
+				if (pathinfo(pp, conf->hwtable, DI_PRIO))
+					pp->priority = PRIO_UNDEF;
+			}
 		}
 	}
 	return 0;
@@ -244,39 +255,54 @@ configure (void)
 	vecs.pathvec = pathvec;
 	vecs.mpvec = curmp;
 
-	/*
-	 * dev is "/dev/" . "sysfs block dev"
-	 */
-	if (conf->dev) {
-		if (!strncmp(conf->dev, "/dev/", 5) &&
-		    strlen(conf->dev) > 5)
-			dev = conf->dev + 5;
-		else
-			dev = conf->dev;
-	}
+	dev = convert_dev(conf->dev, (conf->dev_type == DEV_DEVNODE));
 
 	/*
 	 * if we have a blacklisted device parameter, exit early
 	 */
-	if (dev &&
-	    (filter_devnode(conf->blist_devnode, conf->elist_devnode, dev) > 0))
-			goto out;
-
+	if (dev && conf->dev_type == DEV_DEVNODE && conf->dry_run != 3 &&
+	    (filter_devnode(conf->blist_devnode,
+			    conf->elist_devnode, dev) > 0)) {
+		if (conf->dry_run == 2)
+			printf("%s is not a valid multipath device path\n",
+			       conf->dev);
+		goto out;
+	}
 	/*
 	 * scope limiting must be translated into a wwid
 	 * failing the translation is fatal (by policy)
 	 */
 	if (conf->dev) {
-		refwwid = get_refwwid(conf->dev, conf->dev_type, pathvec);
-
+		int failed = get_refwwid(conf->dev, conf->dev_type, pathvec,
+					 &refwwid);
 		if (!refwwid) {
-			condlog(3, "scope is nul");
+			if (failed == 2 && conf->dry_run == 2)
+				printf("%s is not a valid multipath device path\n", conf->dev);
+			else
+				condlog(3, "scope is nul");
+			goto out;
+		}
+		if (conf->dry_run == 3) {
+			r = remove_wwid(refwwid);
+			if (r == 0)
+				printf("wwid '%s' removed\n", refwwid);
+			else if (r == 1) {
+				printf("wwid '%s' not in wwids file\n",
+					refwwid);
+				r = 0;
+			}
 			goto out;
 		}
 		condlog(3, "scope limited to %s", refwwid);
-		if (filter_wwid(conf->blist_wwid, conf->elist_wwid,
-				refwwid) > 0)
+		if (conf->dry_run == 2) {
+			if (check_wwids_file(refwwid, 0) == 0){
+				printf("%s is a valid multipath device path\n", conf->dev);
+				r = 0;
+			}
+			else
+				printf("%s is not a valid multipath device path\n", conf->dev);
 			goto out;
+		}
 	}
 
 	/*
@@ -396,27 +422,18 @@ get_dev_type(char *dev) {
 int
 main (int argc, char *argv[])
 {
+	struct udev *udev;
 	int arg;
 	extern char *optarg;
 	extern int optind;
 	int r = 1;
 
-	if (getuid() != 0) {
-		fprintf(stderr, "need to be root\n");
-		exit(1);
-	}
+	udev = udev_new();
 
-	if (dm_prereq())
+	if (load_config(DEFAULT_CONFIGFILE, udev))
 		exit(1);
 
-	if (load_config(DEFAULT_CONFIGFILE))
-		exit(1);
-
-	if (sysfs_init(conf->sysfs_dir, FILE_NAME_SIZE)) {
-		condlog(0, "multipath tools need sysfs mounted");
-		exit(1);
-	}
-	while ((arg = getopt(argc, argv, ":dhl::FfM:v:p:b:Brtq")) != EOF ) {
+	while ((arg = getopt(argc, argv, ":dchl::FfM:v:p:b:BrtqwW")) != EOF ) {
 		switch(arg) {
 		case 1: printf("optarg : %s\n",optarg);
 			break;
@@ -438,8 +455,12 @@ main (int argc, char *argv[])
 		case 'q':
 			conf->allow_queueing = 1;
 			break;
+		case 'c':
+			conf->dry_run = 2;
+			break;
 		case 'd':
-			conf->dry_run = 1;
+			if (!conf->dry_run)
+				conf->dry_run = 1;
 			break;
 		case 'f':
 			conf->remove = FLUSH_ONE;
@@ -473,12 +494,18 @@ main (int argc, char *argv[])
 			break;
 		case 't':
 			r = dump_config();
-			goto out;
+			goto out_free_config;
 		case 'h':
 			usage(argv[0]);
 			exit(0);
+		case 'w':
+			conf->dry_run = 3;
+			break;
+		case 'W':
+			conf->dry_run = 4;
+			break;
 		case ':':
-			fprintf(stderr, "Missing option arguement\n");
+			fprintf(stderr, "Missing option argument\n");
 			usage(argv[0]);
 			exit(1);
 		case '?':
@@ -490,6 +517,16 @@ main (int argc, char *argv[])
 			exit(1);
 		}
 	}
+
+	if (getuid() != 0) {
+		fprintf(stderr, "need to be root\n");
+		exit(1);
+	}
+
+	if (dm_prereq())
+		exit(1);
+	dm_drv_version(conf->version, TGT_MPATH);
+
 	if (optind < argc) {
 		conf->dev = MALLOC(FILE_NAME_SIZE);
 
@@ -507,24 +544,54 @@ main (int argc, char *argv[])
 		fd_limit.rlim_cur = conf->max_fds;
 		fd_limit.rlim_max = conf->max_fds;
 		if (setrlimit(RLIMIT_NOFILE, &fd_limit) < 0)
-			condlog(0, "can't set open fds limit to %d : %s\n",
+			condlog(0, "can't set open fds limit to %d : %s",
 				conf->max_fds, strerror(errno));
 	}
 
 	if (init_checkers()) {
 		condlog(0, "failed to initialize checkers");
-		exit(1);
+		goto out;
 	}
 	if (init_prio()) {
 		condlog(0, "failed to initialize prioritizers");
-		exit(1);
+		goto out;
 	}
 	dm_init();
 
+	if (conf->dry_run == 2 &&
+	    (!conf->dev || conf->dev_type == DEV_DEVMAP)) {
+		condlog(0, "the -c option requires a path to check");
+		goto out;
+	}
+	if (conf->dry_run == 3 && !conf->dev) {
+		condlog(0, "the -w option requires a device");
+		goto out;
+	}
+	if (conf->dry_run == 4) {
+		struct multipath * mpp;
+		int i;
+		vector curmp;
+
+		curmp = vector_alloc();
+		if (!curmp) {
+			condlog(0, "can't allocate memory for mp list");
+			goto out;
+		}
+		if (dm_get_maps(curmp) == 0)
+			r = replace_wwids(curmp);
+		if (r == 0)
+			printf("successfully reset wwids\n");
+		vector_foreach_slot_backwards(curmp, mpp, i) {
+			vector_del_slot(curmp, i);
+			free_multipath(mpp, KEEP_PATHS);
+		}
+		vector_free(curmp);
+		goto out;
+	}
 	if (conf->remove == FLUSH_ONE) {
-		if (conf->dev_type == DEV_DEVMAP)
-			r = dm_flush_map(conf->dev);
-		else
+		if (conf->dev_type == DEV_DEVMAP) {
+			r = dm_suspend_and_flush_map(conf->dev);
+		} else
 			condlog(0, "must provide a map name to remove");
 
 		goto out;
@@ -539,12 +606,13 @@ main (int argc, char *argv[])
 out:
 	udev_wait(conf->cookie);
 
-	sysfs_cleanup();
 	dm_lib_release();
 	dm_lib_exit();
 
 	cleanup_prio();
 	cleanup_checkers();
+
+out_free_config:
 	/*
 	 * Freeing config must be done after dm_lib_exit(), because
 	 * the logging function (dm_write_log()), which is called there,
@@ -552,7 +620,7 @@ out:
 	 */
 	free_config(conf);
 	conf = NULL;
-
+	udev_unref(udev);
 #ifdef _DEBUG_
 	dbg_free_final(NULL);
 #endif

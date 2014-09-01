@@ -5,6 +5,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <libudev.h>
 
 #include "checkers.h"
 #include "memory.h"
@@ -24,13 +25,19 @@
 static int
 hwe_strmatch (struct hwentry *hwe1, struct hwentry *hwe2)
 {
-	if (hwe1->vendor && hwe2->vendor && strcmp(hwe1->vendor, hwe2->vendor))
+	if ((hwe2->vendor && !hwe1->vendor) ||
+	    (hwe1->vendor && (!hwe2->vendor ||
+			      strcmp(hwe1->vendor, hwe2->vendor))))
 		return 1;
 
-	if (hwe1->product && hwe2->product && strcmp(hwe1->product, hwe2->product))
+	if ((hwe2->product && !hwe1->product) ||
+	    (hwe1->product && (!hwe2->product ||
+			      strcmp(hwe1->product, hwe2->product))))
 		return 1;
 
-	if (hwe1->revision && hwe2->revision && strcmp(hwe1->revision, hwe2->revision))
+	if ((hwe2->revision && !hwe1->revision) ||
+	    (hwe1->revision && (!hwe2->revision ||
+			      strcmp(hwe1->revision, hwe2->revision))))
 		return 1;
 
 	return 0;
@@ -163,6 +170,9 @@ free_hwe (struct hwentry * hwe)
 	if (hwe->getuid)
 		FREE(hwe->getuid);
 
+	if (hwe->uid_attribute)
+		FREE(hwe->uid_attribute);
+
 	if (hwe->features)
 		FREE(hwe->features);
 
@@ -219,6 +229,9 @@ free_mpe (struct mpentry * mpe)
 
 	if (mpe->getuid)
 		FREE(mpe->getuid);
+
+	if (mpe->uid_attribute)
+		FREE(mpe->uid_attribute);
 
 	if (mpe->alias)
 		FREE(mpe->alias);
@@ -306,6 +319,7 @@ merge_hwe (struct hwentry * dst, struct hwentry * src)
 	merge_str(product);
 	merge_str(revision);
 	merge_str(getuid);
+	merge_str(uid_attribute);
 	merge_str(features);
 	merge_str(hwhandler);
 	merge_str(selector);
@@ -320,10 +334,21 @@ merge_hwe (struct hwentry * dst, struct hwentry * src)
 	merge_num(no_path_retry);
 	merge_num(minio);
 	merge_num(minio_rq);
-	merge_num(pg_timeout);
 	merge_num(flush_on_last_del);
 	merge_num(fast_io_fail);
 	merge_num(dev_loss);
+	merge_num(user_friendly_names);
+	merge_num(retain_hwhandler);
+	merge_num(detect_prio);
+
+	/*
+	 * Make sure features is consistent with
+	 * no_path_retry
+	 */
+	if (dst->no_path_retry == NO_PATH_RETRY_FAIL)
+		remove_feature(&dst->features, "queue_if_no_path");
+	else if (dst->no_path_retry != NO_PATH_RETRY_UNDEF)
+		add_feature(&dst->features, "queue_if_no_path");
 
 	return 0;
 }
@@ -346,6 +371,9 @@ store_hwe (vector hwtable, struct hwentry * dhwe)
 		goto out;
 
 	if (dhwe->revision && !(hwe->revision = set_param_str(dhwe->revision)))
+		goto out;
+
+	if (dhwe->uid_attribute && !(hwe->uid_attribute = set_param_str(dhwe->uid_attribute)))
 		goto out;
 
 	if (dhwe->getuid && !(hwe->getuid = set_param_str(dhwe->getuid)))
@@ -378,6 +406,12 @@ store_hwe (vector hwtable, struct hwentry * dhwe)
 	hwe->no_path_retry = dhwe->no_path_retry;
 	hwe->minio = dhwe->minio;
 	hwe->minio_rq = dhwe->minio_rq;
+	hwe->flush_on_last_del = dhwe->flush_on_last_del;
+	hwe->fast_io_fail = dhwe->fast_io_fail;
+	hwe->dev_loss = dhwe->dev_loss;
+	hwe->user_friendly_names = dhwe->user_friendly_names;
+	hwe->retain_hwhandler = dhwe->retain_hwhandler;
+	hwe->detect_prio = dhwe->detect_prio;
 
 	if (dhwe->bl_product && !(hwe->bl_product = set_param_str(dhwe->bl_product)))
 		goto out;
@@ -392,12 +426,13 @@ out:
 	return 1;
 }
 
-static int
+static void
 factorize_hwtable (vector hw, int n)
 {
 	struct hwentry *hwe1, *hwe2;
 	int i, j;
 
+restart:
 	vector_foreach_slot(hw, hwe1, i) {
 		if (i == n)
 			break;
@@ -407,9 +442,21 @@ factorize_hwtable (vector hw, int n)
 				continue;
 			/* dup */
 			merge_hwe(hwe2, hwe1);
+			if (hwe_strmatch(hwe2, hwe1) == 0) {
+				vector_del_slot(hw, i);
+				free_hwe(hwe1);
+				n -= 1;
+				/*
+				 * Play safe here; we have modified
+				 * the original vector so the outer
+				 * vector_foreach_slot() might
+				 * become confused.
+				 */
+				goto restart;
+			}
 		}
 	}
-	return 0;
+	return;
 }
 
 struct config *
@@ -427,14 +474,14 @@ free_config (struct config * conf)
 	if (conf->dev)
 		FREE(conf->dev);
 
-	if (conf->udev_dir)
-		FREE(conf->udev_dir);
-
 	if (conf->multipath_dir)
 		FREE(conf->multipath_dir);
 
 	if (conf->selector)
 		FREE(conf->selector);
+
+	if (conf->uid_attribute)
+		FREE(conf->uid_attribute);
 
 	if (conf->getuid)
 		FREE(conf->getuid);
@@ -448,6 +495,8 @@ free_config (struct config * conf)
 	if (conf->bindings_file)
 		FREE(conf->bindings_file);
 
+	if (conf->wwids_file)
+		FREE(conf->wwids_file);
 	if (conf->prio_name)
 		FREE(conf->prio_name);
 
@@ -459,13 +508,17 @@ free_config (struct config * conf)
 
 	if (conf->checker_name)
 		FREE(conf->checker_name);
+	if (conf->reservation_key)
+		FREE(conf->reservation_key);
 
 	free_blacklist(conf->blist_devnode);
 	free_blacklist(conf->blist_wwid);
+	free_blacklist(conf->blist_property);
 	free_blacklist_device(conf->blist_device);
 
 	free_blacklist(conf->elist_devnode);
 	free_blacklist(conf->elist_wwid);
+	free_blacklist(conf->elist_property);
 	free_blacklist_device(conf->elist_device);
 
 	free_mptable(conf->mptable);
@@ -475,12 +528,12 @@ free_config (struct config * conf)
 }
 
 int
-load_config (char * file)
+load_config (char * file, struct udev *udev)
 {
 	if (!conf)
 		conf = alloc_config();
 
-	if (!conf)
+	if (!conf || !udev)
 		return 1;
 
 	/*
@@ -489,12 +542,13 @@ load_config (char * file)
 	if (!conf->verbosity)
 		conf->verbosity = DEFAULT_VERBOSITY;
 
-	conf->dmrq = dm_drv_get_rq();
+	conf->udev = udev;
 	conf->dev_type = DEV_NONE;
 	conf->minio = DEFAULT_MINIO;
 	conf->minio_rq = DEFAULT_MINIO_RQ;
 	get_sys_max_fds(&conf->max_fds);
 	conf->bindings_file = set_default(DEFAULT_BINDINGS_FILE);
+	conf->wwids_file = set_default(DEFAULT_WWIDS_FILE);
 	conf->bindings_read_only = 0;
 	conf->multipath_dir = set_default(DEFAULT_MULTIPATHDIR);
 	conf->features = set_default(DEFAULT_FEATURES);
@@ -503,6 +557,10 @@ load_config (char * file)
 	conf->reassign_maps = DEFAULT_REASSIGN_MAPS;
 	conf->checkint = DEFAULT_CHECKINT;
 	conf->max_checkint = MAX_CHECKINT(conf->checkint);
+	conf->pgfailback = DEFAULT_FAILBACK;
+	conf->fast_io_fail = DEFAULT_FAST_IO_FAIL;
+	conf->retain_hwhandler = DEFAULT_RETAIN_HWHANDLER;
+	conf->detect_prio = DEFAULT_DETECT_PRIO;
 
 	/*
 	 * preload default hwtable
@@ -562,8 +620,12 @@ load_config (char * file)
 		if (!conf->blist_device)
 			goto out;
 	}
-	if (setup_default_blist(conf))
-		goto out;
+	if (conf->blist_property == NULL) {
+		conf->blist_property = vector_alloc();
+
+		if (!conf->blist_property)
+			goto out;
+	}
 
 	if (conf->elist_devnode == NULL) {
 		conf->elist_devnode = vector_alloc();
@@ -585,19 +647,25 @@ load_config (char * file)
 			goto out;
 	}
 
+	if (conf->elist_property == NULL) {
+		conf->elist_property = vector_alloc();
+
+		if (!conf->elist_property)
+			goto out;
+	}
+	if (setup_default_blist(conf))
+		goto out;
+
 	if (conf->mptable == NULL) {
 		conf->mptable = vector_alloc();
 		if (!conf->mptable)
 			goto out;
 	}
-	if (conf->udev_dir == NULL)
-		conf->udev_dir = set_default(DEFAULT_UDEVDIR);
-
 	if (conf->bindings_file == NULL)
 		conf->bindings_file = set_default(DEFAULT_BINDINGS_FILE);
 
-	if (!conf->udev_dir || !conf->multipath_dir ||
-	    !conf->bindings_file)
+	if (!conf->multipath_dir || !conf->bindings_file ||
+	    !conf->wwids_file)
 		goto out;
 
 	return 0;

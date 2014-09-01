@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <libdevmapper.h>
+#include <libudev.h>
 
 #include "checkers.h"
 #include "memory.h"
@@ -44,8 +45,16 @@ free_path (struct path * pp)
 	if (checker_selected(&pp->checker))
 		checker_put(&pp->checker);
 
+	if (prio_selected(&pp->prio))
+		prio_put(&pp->prio);
+
 	if (pp->fd >= 0)
 		close(pp->fd);
+
+	if (pp->udev) {
+		udev_device_unref(pp->udev);
+		pp->udev = NULL;
+	}
 
 	FREE(pp);
 }
@@ -122,6 +131,7 @@ alloc_multipath (void)
 		mpp->bestpg = 1;
 		mpp->mpcontext = NULL;
 		mpp->no_path_retry = NO_PATH_RETRY_UNDEF;
+		mpp->fast_io_fail = MP_FAST_IO_FAIL_UNSET;
 	}
 	return mpp;
 }
@@ -549,6 +559,9 @@ remove_feature(char **f, char *o)
 	 * about to be removed
 	 */
 	p = strchr(*f, ' ');
+	if (!p)
+		/* Internal error, feature string inconsistent */
+		return 1;
 	while (*p == ' ')
 		p++;
 	p--;

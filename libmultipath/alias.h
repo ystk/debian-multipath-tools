@@ -1,4 +1,3 @@
-#define BINDINGS_FILE_TIMEOUT 30
 #define BINDINGS_FILE_HEADER \
 "# Multipath bindings, Version : 1.0\n" \
 "# NOTE: this file is automatically maintained by the multipath program.\n" \
@@ -10,4 +9,4 @@
 
 char *get_user_friendly_alias(char *wwid, char *file, char *prefix,
 			      int bindings_readonly);
-char *get_user_friendly_wwid(char *alias, char *file);
+int get_user_friendly_wwid(char *alias, char *buff, char *file);

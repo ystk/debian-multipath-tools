@@ -75,6 +75,7 @@
 #include <sg_include.h>
 #include <debug.h>
 #include <prio.h>
+#include <structs.h>
 
 #define INQ_REPLY_LEN 255
 #define INQ_CMD_CODE 0x12
@@ -86,7 +87,7 @@
 int hds_modular_prio (const char *dev, int fd)
 {
 	int k;
-	char vendor[8];
+	char vendor[9];
 	char product[32];
 	char serial[32];
 	char ldev[32];
@@ -104,6 +105,7 @@ int hds_modular_prio (const char *dev, int fd)
 	}
 
 	memset (&io_hdr, 0, sizeof (sg_io_hdr_t));
+	memset (inqBuff, 0, INQ_REPLY_LEN);
 	io_hdr.interface_id = 'S';
 	io_hdr.cmd_len = sizeof (inqCmdBlk);
 	io_hdr.mx_sb_len = sizeof (sense_buffer);
@@ -123,7 +125,7 @@ int hds_modular_prio (const char *dev, int fd)
 		return -1;
 	}
 
-	snprintf (vendor, 8, "%.8s", inqBuffp + 8);
+	snprintf (vendor, 9, "%.8s", inqBuffp + 8);
 	snprintf (product, 17, "%.16s", inqBuffp + 16);
 	snprintf (serial, 5, "%.4s", inqBuffp + 40);
 	snprintf (ldev, 5, "%.4s", inqBuffp + 44);

@@ -16,7 +16,9 @@ char *checker_state_names[] = {
       "up",
       "shaky",
       "ghost",
-      "pending"
+      "pending",
+      "timeout",
+      "removed",
 };
 
 static LIST_HEAD(checkers);

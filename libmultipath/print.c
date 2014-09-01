@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <string.h>
+#include <errno.h>
 
 #include "checkers.h"
 #include "vector.h"
@@ -24,6 +26,7 @@
 #include "switchgroup.h"
 #include "devmapper.h"
 #include "uevent.h"
+#include "debug.h"
 
 #define MAX(x,y) (x > y) ? x : y
 #define TAIL     (line + len - 1 - c)
@@ -143,6 +146,8 @@ snprint_failback (char * buff, size_t len, struct multipath * mpp)
 {
 	if (mpp->pgfailback == -FAILBACK_IMMEDIATE)
 		return snprintf(buff, len, "immediate");
+	if (mpp->pgfailback == -FAILBACK_FOLLOWOVER)
+		return snprintf(buff, len, "followover");
 
 	if (!mpp->failback_tick)
 		return snprintf(buff, len, "-");
@@ -330,6 +335,10 @@ snprint_chk_state (char * buff, size_t len, struct path * pp)
 		return snprintf(buff, len, "shaky");
 	case PATH_GHOST:
 		return snprintf(buff, len, "ghost");
+	case PATH_PENDING:
+		return snprintf(buff, len, "i/o pending");
+	case PATH_TIMEOUT:
+		return snprintf(buff, len, "i/o timeout");
 	default:
 		return snprintf(buff, len, "undef");
 	}
@@ -379,7 +388,6 @@ snprint_pg_selector (char * buff, size_t len, struct pathgroup * pgp)
 static int
 snprint_pg_pri (char * buff, size_t len, struct pathgroup * pgp)
 {
-	int avg_priority = 0;
 	/*
 	 * path group priority is not updated for every path prio change,
 	 * but only on switch group code path.
@@ -387,9 +395,7 @@ snprint_pg_pri (char * buff, size_t len, struct pathgroup * pgp)
 	 * Printing is another reason to update.
 	 */
 	path_group_prio_update(pgp);
-	if (pgp->enabled_paths)
-		avg_priority = pgp->priority / pgp->enabled_paths;
-	return snprint_int(buff, len, avg_priority);
+	return snprint_int(buff, len, pgp->priority);
 }
 
 static int
@@ -417,6 +423,16 @@ static int
 snprint_path_serial (char * buff, size_t len, struct path * pp)
 {
 	return snprint_str(buff, len, pp->serial);
+}
+
+static int
+snprint_path_mpp (char * buff, size_t len, struct path * pp)
+{
+	if (!pp->mpp)
+		return snprintf(buff, len, "[orphan]");
+	if (!pp->mpp->alias)
+		return snprintf(buff, len, "[unknown]");
+	return snprint_str(buff, len, pp->mpp->alias);
 }
 
 static int
@@ -462,6 +478,7 @@ struct path_data pd[] = {
 	{'p', "pri",           0, snprint_pri},
 	{'S', "size",          0, snprint_path_size},
 	{'z', "serial",        0, snprint_path_serial},
+	{'m', "multipath",     0, snprint_path_mpp},
 	{0, NULL, 0 , NULL}
 };
 
@@ -755,11 +772,30 @@ snprint_pathgroup (char * line, int len, char * format,
 extern void
 print_multipath_topology (struct multipath * mpp, int verbosity)
 {
-	char buff[MAX_LINE_LEN * MAX_LINES] = {};
+	int resize;
+	char *buff = NULL;
+	char *old = NULL;
+	int len, maxlen = MAX_LINE_LEN * MAX_LINES;
 
-	memset(&buff[0], 0, MAX_LINE_LEN * MAX_LINES);
-	snprint_multipath_topology(&buff[0], MAX_LINE_LEN * MAX_LINES,
-				   mpp, verbosity);
+	buff = MALLOC(maxlen);
+	do {
+		if (!buff) {
+			if (old)
+				FREE(old);
+			condlog(0, "couldn't allocate memory for list: %s\n",
+				strerror(errno));
+			return;
+		}
+
+		len = snprint_multipath_topology(buff, maxlen, mpp, verbosity);
+		resize = (len == maxlen - 1);
+
+		if (resize) {
+			maxlen *= 2;
+			old = buff;
+			buff = REALLOC(buff, maxlen);
+		}
+	} while (resize);
 	printf("%s", buff);
 }
 
@@ -1053,6 +1089,19 @@ snprint_blacklist_report (char * buff, int len)
 
 	if ((len - fwd - threshold) <= 0)
 		return len;
+	fwd += snprintf(buff + fwd, len - fwd, "udev property rules:\n"
+					       "- blacklist:\n");
+	if (!snprint_blacklist_group(buff, len, &fwd, &conf->blist_property))
+		return len;
+
+	if ((len - fwd - threshold) <= 0)
+		return len;
+	fwd += snprintf(buff + fwd, len - fwd, "- exceptions:\n");
+	if (snprint_blacklist_group(buff, len, &fwd, &conf->elist_property) == 0)
+		return len;
+
+	if ((len - fwd - threshold) <= 0)
+		return len;
 	fwd += snprintf(buff + fwd, len - fwd, "wwid rules:\n"
 					       "- blacklist:\n");
 	if (snprint_blacklist_group(buff, len, &fwd, &conf->blist_wwid) == 0)
@@ -1111,6 +1160,15 @@ snprint_blacklist (char * buff, int len)
 	}
 	vector_foreach_slot (conf->blist_wwid, ble, i) {
 		kw = find_keyword(rootkw->sub, "wwid");
+		if (!kw)
+			return 0;
+		fwd += snprint_keyword(buff + fwd, len - fwd, "\t%k %v\n",
+				       kw, ble);
+		if (fwd > len)
+			return len;
+	}
+	vector_foreach_slot (conf->blist_property, ble, i) {
+		kw = find_keyword(rootkw->sub, "property");
 		if (!kw)
 			return 0;
 		fwd += snprint_keyword(buff + fwd, len - fwd, "\t%k %v\n",
@@ -1179,6 +1237,15 @@ snprint_blacklist_except (char * buff, int len)
 	}
 	vector_foreach_slot (conf->elist_wwid, ele, i) {
 		kw = find_keyword(rootkw->sub, "wwid");
+		if (!kw)
+			return 0;
+		fwd += snprint_keyword(buff + fwd, len - fwd, "\t%k %v\n",
+				       kw, ele);
+		if (fwd > len)
+			return len;
+	}
+	vector_foreach_slot (conf->elist_property, ele, i) {
+		kw = find_keyword(rootkw->sub, "property");
 		if (!kw)
 			return 0;
 		fwd += snprint_keyword(buff + fwd, len - fwd, "\t%k %v\n",

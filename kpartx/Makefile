@@ -14,7 +14,7 @@ endif
 
 LDFLAGS = -ldevmapper
 OBJS = bsd.o dos.o kpartx.o solaris.o unixware.o dasd.o sun.o \
-       gpt.o mac.o crc32.o lopart.o xstrncpy.o devmapper.o
+       gpt.o mac.o ps3.o crc32.o lopart.o xstrncpy.o devmapper.o
 EXEC = kpartx
 
 all: $(EXEC)
@@ -36,6 +36,7 @@ install: $(EXEC) $(EXEC).8
 uninstall:
 	rm -f $(DESTDIR)$(bindir)/$(EXEC)
 	rm -f $(DESTDIR)$(mandir)/$(EXEC).8.gz
+	rm -f $(DESTDIR)$(libudevdir)/kpartx_id
 
 clean:
 	rm -f core *.o $(EXEC) *.gz

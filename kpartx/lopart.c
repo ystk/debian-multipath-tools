@@ -26,22 +26,15 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sysmacros.h>
-
-#if defined(__hppa__) || defined(__powerpc64__) || defined (__alpha__) \
- || defined (__x86_64__)
-typedef unsigned long __kernel_old_dev_t;
-#elif defined(__powerpc__) || defined(__ia64__) || (defined(__sparc__) && defined (__arch64__))
-typedef unsigned int __kernel_old_dev_t;
-#else
-typedef unsigned short __kernel_old_dev_t;
-#endif
-
-#define dev_t __kernel_old_dev_t
-
+#include <asm/posix_types.h>
 #include <linux/loop.h>
 
 #include "lopart.h"
 #include "xstrncpy.h"
+
+#ifndef LOOP_CTL_GET_FREE
+#define LOOP_CTL_GET_FREE       0x4C82
+#endif
 
 #if !defined (__alpha__) && !defined (__ia64__) && !defined (__x86_64__) \
         && !defined (__s390x__)
@@ -151,14 +144,23 @@ find_unused_loop_device (void)
 
 	char dev[20];
 	char *loop_formats[] = { "/dev/loop%d", "/dev/loop/%d" };
-	int i, j, fd, somedev = 0, someloop = 0, loop_known = 0;
+	int i, j, fd, first = 0, somedev = 0, someloop = 0, loop_known = 0;
 	struct stat statbuf;
 	struct loop_info loopinfo;
 	FILE *procdev;
 
+	if (stat("/dev/loop-control", &statbuf) == 0 &&
+	    S_ISCHR(statbuf.st_mode)) {
+		fd = open("/dev/loop-control", O_RDWR);
+		if (fd >= 0)
+			first = ioctl(fd, LOOP_CTL_GET_FREE);
+		close(fd);
+		if (first < 0)
+			first = 0;
+	}
 	for (j = 0; j < SIZE(loop_formats); j++) {
 
-	    for(i = 0; i < 256; i++) {
+	    for(i = first; i < 256; i++) {
 		sprintf(dev, loop_formats[j], i);
 
 		if (stat (dev, &statbuf) == 0 && S_ISBLK(statbuf.st_mode)) {
@@ -216,13 +218,13 @@ find_unused_loop_device (void)
 		fprintf(stderr,
 		    "mount: Could not find any loop device, and, according to %s,\n"
 		    "       this kernel does not know about the loop device.\n"
-		    "       (If so, then recompile or `insmod loop.o'.)",
+		    "       (If so, then recompile or `modprobe loop'.)",
 		      PROC_DEVICES);
 
 	    else
 		fprintf(stderr,
 		    "mount: Could not find any loop device. Maybe this kernel does not know\n"
-		    "       about the loop device (then recompile or `insmod loop.o'), or\n"
+		    "       about the loop device (then recompile or `modprobe loop'), or\n"
 		    "       maybe /dev/loop# has the wrong major number?");
 
 	} else
@@ -241,7 +243,7 @@ set_loop (const char *device, const char *file, int offset, int *loopro)
 
 	if ((ffd = open (file, mode)) < 0) {
 
-		if (!*loopro && errno == EROFS)
+		if (!*loopro && (errno == EROFS || errno == EACCES))
 			ffd = open (file, mode = O_RDONLY);
 
 		if (ffd < 0) {
@@ -286,6 +288,7 @@ set_loop (const char *device, const char *file, int offset, int *loopro)
 extern int 
 del_loop (const char *device)
 {
+	int retries = 3;
 	int fd;
 
 	if ((fd = open (device, O_RDONLY)) < 0) {
@@ -295,10 +298,17 @@ del_loop (const char *device)
 		return 1;
 	}
 
-	if (ioctl (fd, LOOP_CLR_FD, 0) < 0) {
-		perror ("ioctl: LOOP_CLR_FD");
-		close (fd);
-		return 1;
+	while (ioctl (fd, LOOP_CLR_FD, 0) < 0) {
+		if (errno != EBUSY || retries-- <= 0) {
+			perror ("ioctl: LOOP_CLR_FD");
+			close (fd);
+			return 1;
+		}
+		fprintf(stderr,
+			"loop: device %s still in use, retrying delete\n",
+			device);
+		sleep(1);
+		continue;
 	}
 
 	close (fd);
