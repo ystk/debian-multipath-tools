@@ -1,0 +1,20 @@
+Disable systemd for multipath. Multipath is a critical component in the storage stack. The shell init scripts provide us flexibility that systemd does not directly. Yes, we can call in a helper script from the systemd service file, but that then forfeits the idea of system.
+Index: multipath-tools/Makefile.inc
+===================================================================
+--- multipath-tools.orig/Makefile.inc	2014-09-05 15:02:10.000000000 +0530
++++ multipath-tools/Makefile.inc	2014-09-05 17:43:38.715859116 +0530
+@@ -21,10 +21,13 @@
+ 	endif
+ endif
+ 
+-ifndef SYSTEMD
++# DISABLE_SYSTEMD should be passed from debian/rules
++ifndef DISABLE_SYSTEMD
++    ifndef SYSTEMD
+ 	ifeq ($(shell systemctl --version > /dev/null 2>&1 && echo 1), 1)
+ 		SYSTEMD = $(shell systemctl --version 2> /dev/null |  sed -n 's/systemd \([0-9]*\)/\1/p')
+ 	endif
++    endif
+ endif
+ 
+ prefix      = 

@@ -63,11 +63,22 @@ Description: Support booting from multipath devices
 Package: multipath-udeb
 Package-Type: udeb
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, multipath-modules
+Depends: ${shlibs:Depends}, ${misc:Depends}, multipath-modules, kpartx-udeb
 Section: debian-installer
 Description: maintain multipath block device access - udeb package
  This is a udeb, or a microdeb, for the debian-installer.
  .
  These tools are in charge of maintaining the disk multipath device maps and
  react to path and map events.
+
+Package: kpartx-udeb
+Package-Type: udeb
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Section: debian-installer
+Description: create device mappings for partitions - udeb package
+ This is a udeb, or a microdeb, for the debian-installer.
+ .
+ Kpartx can be used to set up device mappings for the partitions of any
+ partitioned block device. It is part of the Linux multipath-tools.
 

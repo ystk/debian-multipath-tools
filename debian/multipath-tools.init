@@ -82,9 +82,7 @@ case "$1" in
 	fi
 	;;
   status)
-	log_daemon_msg "Status $DESC" "$NAME"
-	start-stop-daemon --oknodo --status --quiet --pidfile /var/run/$NAME.pid --exec $DAEMON -- $DAEMON_OPTS
-	log_end_msg $?
+	status_of_proc -p /var/run/$NAME.pid $DAEMON $NAME && exit 0 || exit $?
 	;;
   reload|force-reload)
 	log_daemon_msg "Reloading $DESC" "$NAME"

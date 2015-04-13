@@ -1,3 +1,17 @@
+multipath-tools (0.5.0-4) unstable; urgency=medium
+
+  The systemd support has been dropped.
+
+  Device Mapper multipath is a core component in the SAN Stack. The
+  flexibility provided by shell init scripts were flexible. With
+  systemd, it is not the same anymore. We sure can create shell scripts
+  and pass it to systemd to run, but then it forfeits the philosophy of
+  systemd that "shell is evil". So rather that passing shell units to
+  systemd, we'll let systemd run this service in SysV compatibility
+  mode.
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Fri, 05 Sep 2014 18:03:12 +0530
+
 multipath-tools (0.4.7-2) unstable; urgency=low
 
   udev, which provides scsi_id, moved the binary to /lib/udev.

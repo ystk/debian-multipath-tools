@@ -1,3 +1,45 @@
+multipath-tools (0.5.0-6) unstable; urgency=medium
+
+  [ Mauricio Faria de Oliveira ]
+  * Build multipath-udeb with static libgcc (Closes: #779579)
+
+ -- Mauricio Faria de Oliveira <mauricfo@linux.vnet.ibm.com>  Tue, 03 Mar 2015 15:52:58 -0300
+
+multipath-tools (0.5.0-5) unstable; urgency=medium
+
+  * [5f967eb] Better daemon status in init's status action.
+    Thanks to Joerg Jaspert (Closes: #755483)
+  * [8455ce6] Introduce kpartx-udeb.
+    Thanks to Philip Susi (Closes: #751029)
+  * [72419cd] Fix syntax error in debian/control file
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Tue, 16 Sep 2014 14:59:11 +0530
+
+multipath-tools (0.5.0-4) unstable; urgency=medium
+
+  * [55c2ef2] Drop systemd support in multipath-tools
+    (Closes: #759849, #760182, #760189)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Fri, 05 Sep 2014 17:50:03 +0530
+
+multipath-tools (0.5.0-3) unstable; urgency=medium
+
+  * [6c453f2] Install sytemd files into /lib/systemd/system/
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 01 Sep 2014 15:49:28 +0530
+
+multipath-tools (0.5.0-2) unstable; urgency=medium
+
+  * [631296d] Add libsystemd-daemon-dev to Build-Dep (Closes: #759849)
+  * [742c706] Add systemd files
+  * [0783f2e] Add lintian override because, for systemd, we are
+    shipping upstream's service file. There is no point in redoing
+    the whole stuff of renaming the systemd service file.
+    Also, it is yet to see how systemd will handle many of the pre/post
+    checks that we had the flexibility to do in the shell init scirpt
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Mon, 01 Sep 2014 14:10:40 +0530
+
 multipath-tools (0.5.0-1) unstable; urgency=low
 
   * [955018b] Imported Upstream version 0.5.0

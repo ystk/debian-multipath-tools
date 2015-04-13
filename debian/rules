@@ -23,10 +23,11 @@ include /usr/share/dpkg/buildflags.mk
 
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
+export DISABLE_SYSTEMD = 1
 
 build: build-arch build-indep
 
-build-arch: build-stamp
+build-arch: build-multipath-udeb-stamp build-stamp
 build-indep: build-stamp
 
 build-stamp:
@@ -38,15 +39,30 @@ build-stamp:
 
 	touch $@
 
+# multipath-udeb: build separately; don't reference dynamic libgcc at runtime (#779579)
+build-multipath-udeb-stamp:
+	dh_testdir
+
+	DEB_CFLAGS_MAINT_APPEND="-static-libgcc" $(MAKE) $(OPTFLAGS) LIB=lib
+	
+	# store files for install target
+	mkdir -p $(CURDIR)/debian/tmp-multipath-udeb/sbin
+	$(MAKE) install INSTALL_PROGRAM=$(INSTALL_PROGRAM) DESTDIR=$(CURDIR)/debian/tmp-multipath-udeb LIB=lib
+
+	$(MAKE) clean
+
+	touch $@
+
 clean-tree:
 	$(MAKE) clean
 
 clean: clean-tree
 	dh_testdir
-	rm -f build-stamp
+	rm -f build-stamp build-multipath-udeb-stamp
 	dh_prep
 	debconf-updatepo
 	rm -rf debian/*.debhelper.log
+	rm -rf debian/tmp-multipath-udeb
 
 install:
 	dh_testdir
@@ -57,7 +73,8 @@ install:
 	mkdir -p $(CURDIR)/debian/tmp/sbin
 	$(MAKE) install INSTALL_PROGRAM=$(INSTALL_PROGRAM) DESTDIR=$(CURDIR)/debian/tmp LIB=lib
 	install -m 755 debian/dmsetup_env $(CURDIR)/debian/tmp/lib/udev/
-	dh_install -X.rules --fail-missing --sourcedir=$(CURDIR)/debian/tmp
+	dh_install -X.rules --fail-missing -Nmultipath-udeb --sourcedir=$(CURDIR)/debian/tmp
+	dh_install -X.rules --fail-missing -pmultipath-udeb --sourcedir=$(CURDIR)/debian/tmp-multipath-udeb
 	# initramfs stuff:
 	install -D -m 755 debian/initramfs/hooks $(INITRAMFS)/hooks/multipath
 	install -D -m 755 debian/initramfs/local-top \
@@ -80,6 +97,7 @@ binary-arch: build install
 	dh_installchangelogs ChangeLog
 	dh_installdocs
 	dh_installexamples
+	dh_lintian
 	dh_installinit -pmultipath-tools
 	dh_installinit -pmultipath-tools --name=multipath-tools-boot --no-start -- start 21 S .
 	dh_installudev -pkpartx

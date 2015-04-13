@@ -1,3 +1,4 @@
+disable-systemd.patch
 0001-blacklist-cciss-devices.patch
 0009-hardened-build-flags.patch
 0011-patch-udev-rule.patch
