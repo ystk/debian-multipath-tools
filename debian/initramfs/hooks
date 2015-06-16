@@ -48,7 +48,7 @@ add_udev_rules
 [ -r /etc/multipath.conf ] && cp /etc/multipath.conf $DESTDIR/etc/
 add_bindings
 
-for x in dm-multipath dm-round-robin dm-emc; do
+for x in dm-multipath dm-service-time dm-round-robin dm-emc; do
 	manual_add_modules ${x}
 done
 
