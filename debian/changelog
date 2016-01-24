@@ -1,3 +1,19 @@
+multipath-tools (0.5.0-6+deb8u2) jessie; urgency=medium
+
+  * fix discovery of devices with blank rev
+    - 0014-libmultipath-discovery-blank-rev-attr.patch:  
+  * Updates for compatibility with commit "multipath: Implement
+    'property' blacklist".
+    - 0015-libmultipath-property-whitelist-SCSI_IDENT.patch
+    Thanks to Mauricio Faria de Oliveira (Closes: #782400, #782488)
+  * [5ffc2f4] Add documentation to cover additional friendly names
+    scenarios. Thanks to Scott Moser (Closes: #788841)
+  * [af3f228] init: Fix stop failure when no root device is found
+    (Closes: #795278)
+  * [b77859e] Add debian/gbp.conf to use pristine-tar branch
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Wed, 21 Oct 2015 11:37:33 +0200
+
 multipath-tools (0.5.0-6+deb8u1) jessie; urgency=medium
 
   * [b40599e] Add dm-service-time path checked.

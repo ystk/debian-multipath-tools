@@ -63,16 +63,20 @@ case "$1" in
 	;;
   stop)
 	DONT_STOP_MPATHD=0
-        root_dev=$(awk '{ if ($1 !~ /^[ \t]*#/ && $1 ~ /\// && $2 == "/") { print $1; }}' /etc/mtab)
-	dm_num=$(dmsetup info -c --noheadings -o minor $root_dev 2>/dev/null)
-	if [ $? -ne 0 ]; then
+	root_dev=$(awk '{ if ($1 !~ /^[ \t]*#/ && $1 ~ /\// && $2 == "/") { print $1; }}' /etc/mtab)
+	if [ -n "$root_dev" ]; then
+		dm_num=$(dmsetup info -c --noheadings -o minor $root_dev 2>/dev/null)
+	else
+		dm_num=
+	fi
+	if [ $? -ne 0 -o -z "$dm_num" ]; then
 		# Looks like we couldn't find a device mapper root device
 		# But we shouldn't bail out here, otherwise the stop target and the
 		# upgrade processes will break. See DBUG #674733
-		echo;
+		:
 	else
 		root_dm_device="dm-$dm_num"
-		[ -d $syspath/$root_dm_device ] && teardown_slaves $syspath/$root_dm_device
+		[ -d "$syspath/$root_dm_device" ] && teardown_slaves $syspath/$root_dm_device
 	fi
 
 	if [ x$DONT_STOP_MPATHD = x0 ]; then

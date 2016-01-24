@@ -25,6 +25,20 @@ feature can change unexpectedly across reboots. A more stable solution for
 This device should be accessible as /dev/mapper/diskbox1-lun0.
 
 
+
+If using user_friendly_names = yes, please ensure that your /etc/multipath/bindings
+file gets propagated to the initramfs.
+
+For that, please follow the following steps:
+
+1) set "user_friendly_names = yes" in /etc/multipath.conf
+2) Run `multipath -F` to flush your device maps. For root on multipath devices,
+   this could still be tricky
+3) Run `multipath -v3` to read your /etc/multipath.conf changes.
+4) Run `update-initramfs -u -k all` to update your initramfs images.
+
+
+
 Where did my FC-connected filesystem go?
 ========================================
 If you were previously mounting a device connected to your system by

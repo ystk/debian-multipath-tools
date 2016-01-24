@@ -4,3 +4,5 @@ disable-systemd.patch
 0011-patch-udev-rule.patch
 0012-format-security-build-fixes.patch
 0013-fix-spelling-error.patch
+0014-libmultipath-discovery-blank-rev-attr.patch
+0015-libmultipath-property-whitelist-SCSI_IDENT.patch
