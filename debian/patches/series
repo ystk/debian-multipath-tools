@@ -9,3 +9,5 @@
 0009-explicitly-include-posix_types.h.patch
 0010-Dots-are-special-in-groff.patch
 0011-multipath-fix-offset-for-containted-slices.patch
+0012-hp-hardware-handler.patch
+0013-manpage-updates.patch

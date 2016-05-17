@@ -1,3 +1,11 @@
+multipath-tools (0.4.8+git0.761c66f-10) stable-proposed-updates; urgency=low
+
+  * [b5f7694] Change HP hardware hanlder to hp_sw.
+    Thanks to Phil (Closes: 587315)
+  * [4aae2ad] Update man pages (Closes: 644913)
+
+ -- Ritesh Raj Sarraf <rrs@debian.org>  Sun, 30 Oct 2011 23:54:39 +0530
+
 multipath-tools (0.4.8+git0.761c66f-9) unstable; urgency=low
 
   * [0435cc1] Make sure the patchcheckers end up in /lib (Closes: #581377)
